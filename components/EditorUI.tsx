@@ -51,12 +51,13 @@ export function EditorUI() {
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(true);
 
+  // ✅ Auto-generate name ONLY if user hasn't typed anything
   useEffect(() => {
-    if (!documentName && inputText.trim()) {
+    if (!documentName.trim() && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
       setDocumentName(name);
     }
-  }, [inputText, documentName]);
+  }, [inputText]); // ← removed documentName from deps to avoid overriding user input
 
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
     if (!trackedRef.current) return editedText;
@@ -113,7 +114,10 @@ export function EditorUI() {
       alert('No valid content to save. Please run “Edit” first.');
       return;
     }
-    await saveDocument(final, original);
+    // ✅ Pass documentName to saveDocument
+    await saveDocument(final, original, documentName);
+    // ✅ Clear name input after successful save
+    setDocumentName('');
   };
 
   const handleSaveProgress = async () => {
@@ -127,10 +131,11 @@ export function EditorUI() {
   };
 
   return (
-    <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6">
+    // ✅ WHITE BACKGROUND + BLACK TEXT FOR ENTIRE EDITOR
+    <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6 bg-white text-black min-h-screen">
       <div>
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-semibold">Original Text</h2>
+          <h2 className="text-lg font-semibold text-black">Original Text</h2>
           <span className="text-sm text-gray-600">{wordCount} word{wordCount !== 1 ? 's' : ''}</span>
         </div>
         <textarea
@@ -138,14 +143,14 @@ export function EditorUI() {
           onChange={(e) => setInputText(e.target.value)}
           placeholder="Paste your text here..."
           rows={8}
-          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black" // Explicitly set text color to black
+          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black bg-white"
           disabled={isLoading}
         />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <h3 className="font-medium mb-2">Editing Level</h3>
+          <h3 className="font-medium mb-2 text-black">Editing Level</h3>
           <div className="flex flex-wrap gap-2">
             {(['proofread', 'rewrite', 'formal', 'custom'] as EditLevel[]).map((level) => (
               <button
@@ -167,26 +172,26 @@ export function EditorUI() {
               value={customInstruction}
               onChange={(e) => setCustomInstruction(e.target.value)}
               placeholder="Enter custom instruction..."
-              className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black" // Explicitly set text color to black
+              className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black bg-white"
             />
           )}
         </div>
 
         <div>
-          <h3 className="font-medium mb-2">Model & Options</h3>
+          <h3 className="font-medium mb-2 text-black">Model & Options</h3>
           <select
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
-            className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white" // Explicitly set text color to black
+            className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
             disabled={isLoading}
           >
             {BASE_MODELS.map((model) => (
-              <option key={model.id} value={model.id} className="text-black"> // Explicitly set text color to black
+              <option key={model.id} value={model.id} className="text-black bg-white">
                 {model.name}
               </option>
             ))}
           </select>
-          <label className="flex items-center text-sm text-black"> {/* Explicitly set text color to black */}
+          <label className="flex items-center text-sm text-black">
             <input
               type="checkbox"
               checked={isEditorialBoard}
@@ -201,7 +206,7 @@ export function EditorUI() {
 
       <div className="border-t border-gray-300 pt-4">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold">Document Management</h2>
+          <h2 className="text-lg font-semibold text-black">Document Management</h2>
           <button
             onClick={() => setShowDocuments(!showDocuments)}
             className="text-sm text-blue-600"
@@ -218,7 +223,7 @@ export function EditorUI() {
               value={documentName}
               onChange={(e) => setDocumentName(e.target.value)}
               placeholder="Document name..."
-              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black" // Explicitly set text color to black
+              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
             />
             <div className="flex gap-2">
               <button
@@ -240,7 +245,7 @@ export function EditorUI() {
             </div>
 
             <div className="mt-4">
-              <h3 className="font-medium mb-2">Saved Documents</h3>
+              <h3 className="font-medium mb-2 text-black">Saved Documents</h3>
               <div id="documents-list" className="space-y-2 max-h-60 overflow-y-auto">
                 {documents.length === 0 ? (
                   <div className="text-gray-500 text-sm">No saved documents yet</div>
@@ -259,9 +264,7 @@ export function EditorUI() {
                         onClick={() => loadDocument(doc)}
                       >
                         <div className="flex justify-between items-start">
-                          <div className="font-medium text-sm text-black"> {/* Explicitly set text color to black */}
-                            {doc.name}
-                          </div>
+                          <div className="font-medium text-sm text-black">{doc.name}</div>
                           <div className="text-xs text-gray-500">{formattedDate}</div>
                         </div>
                         <div className="flex justify-end gap-1 mt-1">
@@ -314,7 +317,7 @@ export function EditorUI() {
       {(editedText || isLoading) && (
         <div>
           <div className="flex justify-between items-center mb-2">
-            <h2 className="text-lg font-semibold">Edited Result</h2>
+            <h2 className="text-lg font-semibold text-black">Edited Result</h2>
             <div className="flex gap-2">
               <button
                 id="copy-btn"
@@ -358,13 +361,15 @@ export function EditorUI() {
 
           <div
             ref={trackedRef}
-            className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm"
-            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap', color: '#000' }} // Ensure text color is black
+            className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm text-black"
+            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
           >
             {viewMode === 'clean' ? (
               editedText || 'Result will appear here...'
             ) : (
+              // ✅ KEY TO FORCE RE-RENDER PER DOCUMENT
               <TrackedChangesView
+                key={documentId || 'new'}
                 originalText={inputText}
                 editedText={editedText}
                 onAcceptChange={handleAcceptChange}

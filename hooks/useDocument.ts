@@ -42,14 +42,21 @@ export function useDocument() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  const saveDocument = useCallback(async (finalText: string, originalText: string) => {
+  // ✅ Updated: accept optional `name`
+  const saveDocument = useCallback(async (
+    finalText: string,
+    originalText: string,
+    name?: string
+  ) => {
     if (!originalText.trim() || !finalText.trim()) {
       setError('Both original and edited text are required.');
       return;
     }
 
-    let name = originalText.substring(0, 50).replace(/\s+/g, ' ').trim();
-    if (originalText.length > 50) name += '...';
+    // ✅ Use provided name, or auto-generate
+    const docName = name?.trim() ||
+      originalText.substring(0, 50).replace(/\s+/g, ' ').trim() + 
+      (originalText.length > 50 ? '...' : '');
 
     setIsLoading(true);
     setError(null);
@@ -58,7 +65,7 @@ export function useDocument() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
+          name: docName,
           originalText: originalText.trim(),
           editedText: finalText.trim(),
           level: editor.editLevel,
@@ -136,7 +143,9 @@ export function useDocument() {
     }
   }, [editor, fetchDocuments]);
 
+  // ✅ Enhanced loadDocument
   const loadDocument = useCallback((doc: SavedDocument) => {
+    // Load core data into editor
     editor.loadDocument(doc.id, {
       originalText: doc.original_text,
       editedText: doc.edited_text,
@@ -144,16 +153,27 @@ export function useDocument() {
       model: doc.model,
       customInstruction: doc.custom_instruction,
     });
+
+    // ✅ Switch to 'tracked' view — ensure useEditor exposes setViewMode
+    if (typeof editor.setViewMode === 'function') {
+      editor.setViewMode('tracked');
+    }
+
+    // ✅ Optional: trigger re-render if needed (depends on implementation)
+    // If setInputText forces diff recalculation:
+    if (typeof editor.setInputText === 'function') {
+      editor.setInputText(doc.original_text);
+    }
   }, [editor]);
 
   return {
     documents,
     isLoading,
     error,
-    saveDocument,
+    saveDocument,       // ✅ now accepts optional name
     saveProgress,
     deleteDocument,
-    loadDocument,
+    loadDocument,       // ✅ now switches to tracked view
     fetchDocuments,
   };
 }

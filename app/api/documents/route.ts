@@ -1,6 +1,5 @@
 // /app/api/documents/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers'; // ✅ MUST be at top
 import { createSupabaseServerClient } from '@/lib/documents';
 
 const MAX_SAVED_DOCUMENTS = 10;
@@ -10,8 +9,8 @@ function generateDocumentId() {
 }
 
 export async function GET(req: NextRequest) {
-  const cookieStore = await cookies();
-  const ownerId = cookieStore.get('editor_owner_id')?.value;
+  // ✅ Get cookie from req.cookies
+  const ownerId = req.cookies.get('editor_owner_id')?.value;
   if (!ownerId) {
     return NextResponse.json({ documents: [] });
   }
@@ -33,8 +32,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const cookieStore = await cookies();
-  let ownerId = cookieStore.get('editor_owner_id')?.value;
+  // ✅ Get cookie from req.cookies
+  let ownerId = req.cookies.get('editor_owner_id')?.value;
   
   const body = await req.json();
   const {
@@ -74,12 +73,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to save document' }, { status: 500 });
   }
 
+  // ✅ Set cookie via response
   const response = NextResponse.json({ id: docId, success: true });
-  if (!cookieStore.get('editor_owner_id')) {
+  if (!req.cookies.get('editor_owner_id')) {
     response.cookies.set('editor_owner_id', ownerId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 30 * 24 * 60 * 60,
+      maxAge: 30 * 24 * 60 * 60, // 30 days
       path: '/',
     });
   }
@@ -87,8 +87,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const cookieStore = await cookies();
-  const ownerId = cookieStore.get('editor_owner_id')?.value;
+  // ✅ Get cookie from req.cookies
+  const ownerId = req.cookies.get('editor_owner_id')?.value;
   if (!ownerId) {
     return NextResponse.json({ error: 'No session' }, { status: 400 });
   }
@@ -120,8 +120,8 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const cookieStore = await cookies();
-  const ownerId = cookieStore.get('editor_owner_id')?.value;
+  // ✅ Get cookie from req.cookies
+  const ownerId = req.cookies.get('editor_owner_id')?.value;
   if (!ownerId) {
     return NextResponse.json({ error: 'No session' }, { status: 400 });
   }

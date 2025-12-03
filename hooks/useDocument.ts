@@ -46,7 +46,7 @@ export function useDocument() {
     const {
       inputText,
       editedText,
-      editLevel,          // ✅ declared here
+      editLevel,
       selectedModel,
       customInstruction,
     } = editor;
@@ -54,7 +54,8 @@ export function useDocument() {
     const originalText = inputText.trim();
     const finalText = editedText.trim();
 
-    if (!originalText || !finalText || finalText.includes('Result will appear here')) {
+    // ✅ FIXED: Only check for empty — no placeholder check needed
+    if (!originalText || !finalText) {
       setError('No valid content to save');
       return;
     }
@@ -72,7 +73,7 @@ export function useDocument() {
           name,
           originalText,
           editedText: finalText,
-          level: editLevel,     // ✅ used correctly here
+          level: editLevel,
           model: selectedModel,
           customInstruction,
         }),
@@ -101,7 +102,8 @@ export function useDocument() {
     const originalText = editor.inputText.trim();
     const finalText = editor.editedText.trim();
 
-    if (!originalText || !finalText || finalText.includes('Result will appear here')) {
+    // ✅ FIXED: Only check for empty
+    if (!originalText || !finalText) {
       setError('No valid content to save');
       return;
     }
@@ -161,12 +163,13 @@ export function useDocument() {
     });
   }, [editor]);
 
+  // Auto-save effect (unchanged, but fixed truncated code)
   useEffect(() => {
     if (
       !editor.documentId ||
       !editor.inputText.trim() ||
-      !editor.editedText.trim() ||
-      editor.editedText.includes('Result will appear here')
+      !editor.editedText.trim()
+      // ✅ Removed placeholder check here too
     ) {
       return;
     }

@@ -274,7 +274,7 @@ export function EditorUI() {
               : 'bg-blue-600 hover:bg-blue-700 text-white'
           }`}
         >
-          {isLoading ? '⏳ Processing...' : '✨ Apply Edit'}
+          {isLoading ? '⏳ Processing...' : '✨ Edit'}
         </button>
         {error && <p className="mt-2 text-red-600 text-sm">{error}</p>}
         {docError && <p className="mt-2 text-red-600 text-sm">{docError}</p>}

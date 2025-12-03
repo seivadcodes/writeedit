@@ -1,27 +1,13 @@
+// next.config.js
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    serverComponentsExternalPackages: ['docx', 'jszip'],
-  },
+  serverExternalPackages: ['docx', 'jszip'], // ✅ moved out of experimental
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: `
-              default-src 'self';
-              script-src 'self' 'unsafe-eval' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net;
-              style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-              img-src 'self'  https://*.supabase.co;
-              font-src 'self' https://fonts.gstatic.com;
-              connect-src 'self' https://*.supabase.co https://api.example.com;
-              frame-src 'none';
-              object-src 'none';
-            `.replace(/\s{2,}/g, ' ').trim(),
-          },
           {
             key: 'X-Content-Type-Options',
             value: 'nosniff',

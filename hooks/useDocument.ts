@@ -42,9 +42,20 @@ export function useDocument() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  const saveDocument = useCallback(async (finalText: string, originalText: string) => {
-    if (!originalText.trim() || !finalText.trim()) {
-      setError('Both original and edited text are required.');
+  const saveDocument = useCallback(async () => {
+    const {
+      inputText,
+      editedText,
+      editLevel,          // ✅ declared here
+      selectedModel,
+      customInstruction,
+    } = editor;
+
+    const originalText = inputText.trim();
+    const finalText = editedText.trim();
+
+    if (!originalText || !finalText || finalText.includes('Result will appear here')) {
+      setError('No valid content to save');
       return;
     }
 
@@ -59,11 +70,11 @@ export function useDocument() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          originalText: originalText.trim(),
-          editedText: finalText.trim(),
-          level: editor.editLevel,
-          model: editor.selectedModel,
-          customInstruction: editor.customInstruction,
+          originalText,
+          editedText: finalText,
+          level: editLevel,     // ✅ used correctly here
+          model: selectedModel,
+          customInstruction,
         }),
       });
 
@@ -81,13 +92,17 @@ export function useDocument() {
     }
   }, [editor, fetchDocuments]);
 
-  const saveProgress = useCallback(async (finalText: string, originalText: string) => {
+  const saveProgress = useCallback(async () => {
     if (!editor.documentId) {
       setError('No document loaded to update');
       return;
     }
-    if (!originalText.trim() || !finalText.trim()) {
-      setError('Both original and edited text are required.');
+
+    const originalText = editor.inputText.trim();
+    const finalText = editor.editedText.trim();
+
+    if (!originalText || !finalText || finalText.includes('Result will appear here')) {
+      setError('No valid content to save');
       return;
     }
 
@@ -99,8 +114,8 @@ export function useDocument() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: editor.documentId,
-          originalText: originalText.trim(),
-          editedText: finalText.trim(),
+          originalText,
+          editedText: finalText,
         }),
       });
 
@@ -145,6 +160,23 @@ export function useDocument() {
       customInstruction: doc.custom_instruction,
     });
   }, [editor]);
+
+  useEffect(() => {
+    if (
+      !editor.documentId ||
+      !editor.inputText.trim() ||
+      !editor.editedText.trim() ||
+      editor.editedText.includes('Result will appear here')
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      saveProgress();
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [editor.documentId, editor.inputText, editor.editedText, saveProgress]);
 
   return {
     documents,

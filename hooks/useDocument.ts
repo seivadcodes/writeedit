@@ -22,14 +22,14 @@ export function useDocument() {
   const [error, setError] = useState<string | null>(null);
   const editor = useEditor();
 
-  // Fetch documents on mount
   const fetchDocuments = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/documents');
       if (!res.ok) throw new Error('Failed to load documents');
       const { documents: docs } = await res.json();
-      setDocuments(docs);
+      setDocuments(docs || []);
     } catch (err: any) {
       setError(err.message);
       console.error('Failed to fetch documents:', err);
@@ -42,25 +42,25 @@ export function useDocument() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  // Save new document
   const saveDocument = useCallback(async () => {
     const {
       inputText,
       editedText,
-      editLevel,
+      editLevel,          // ✅ declared here
       selectedModel,
       customInstruction,
-      documentId,
     } = editor;
 
-    if (!inputText.trim() || !editedText.trim()) {
+    const originalText = inputText.trim();
+    const finalText = editedText.trim();
+
+    if (!originalText || !finalText || finalText.includes('Result will appear here')) {
       setError('No valid content to save');
       return;
     }
 
-    // Generate name from first sentence
-    let name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim();
-    if (inputText.length > 50) name += '...';
+    let name = originalText.substring(0, 50).replace(/\s+/g, ' ').trim();
+    if (originalText.length > 50) name += '...';
 
     setIsLoading(true);
     setError(null);
@@ -70,9 +70,9 @@ export function useDocument() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          originalText: inputText,
-          editedText,
-          level: editLevel,
+          originalText,
+          editedText: finalText,
+          level: editLevel,     // ✅ used correctly here
           model: selectedModel,
           customInstruction,
         }),
@@ -81,10 +81,9 @@ export function useDocument() {
       if (!res.ok) throw new Error('Failed to save document');
       const { id } = await res.json();
 
-      // Set as current document
       editor.setDocumentId(id);
-
       await fetchDocuments();
+      setError(null);
     } catch (err: any) {
       setError(err.message);
       console.error('Save failed:', err);
@@ -93,10 +92,17 @@ export function useDocument() {
     }
   }, [editor, fetchDocuments]);
 
-  // Save progress to existing document
   const saveProgress = useCallback(async () => {
     if (!editor.documentId) {
       setError('No document loaded to update');
+      return;
+    }
+
+    const originalText = editor.inputText.trim();
+    const finalText = editor.editedText.trim();
+
+    if (!originalText || !finalText || finalText.includes('Result will appear here')) {
+      setError('No valid content to save');
       return;
     }
 
@@ -108,13 +114,14 @@ export function useDocument() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: editor.documentId,
-          originalText: editor.inputText,
-          editedText: editor.editedText,
+          originalText,
+          editedText: finalText,
         }),
       });
 
       if (!res.ok) throw new Error('Failed to update document');
-      await fetchDocuments(); // refresh timestamp
+      await fetchDocuments();
+      setError(null);
     } catch (err: any) {
       setError(err.message);
       console.error('Update failed:', err);
@@ -123,7 +130,6 @@ export function useDocument() {
     }
   }, [editor, fetchDocuments]);
 
-  // Delete document
   const deleteDocument = useCallback(async (id: string) => {
     setIsLoading(true);
     setError(null);
@@ -133,7 +139,6 @@ export function useDocument() {
       });
       if (!res.ok) throw new Error('Failed to delete document');
       await fetchDocuments();
-
       if (editor.documentId === id) {
         editor.reset();
         editor.setDocumentId(null);
@@ -146,7 +151,6 @@ export function useDocument() {
     }
   }, [editor, fetchDocuments]);
 
-  // Load document into editor
   const loadDocument = useCallback((doc: SavedDocument) => {
     editor.loadDocument(doc.id, {
       originalText: doc.original_text,
@@ -157,9 +161,15 @@ export function useDocument() {
     });
   }, [editor]);
 
-  // Auto-save every 2 seconds if document is loaded
   useEffect(() => {
-    if (!editor.documentId || !editor.inputText.trim() || !editor.editedText.trim()) return;
+    if (
+      !editor.documentId ||
+      !editor.inputText.trim() ||
+      !editor.editedText.trim() ||
+      editor.editedText.includes('Result will appear here')
+    ) {
+      return;
+    }
 
     const timer = setTimeout(() => {
       saveProgress();

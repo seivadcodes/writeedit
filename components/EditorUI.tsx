@@ -15,7 +15,7 @@ const BASE_MODELS = [
 export function EditorUI() {
   const editor = useEditor();
   const docManager = useDocument();
-  const trackedRef = useRef<HTMLDivElement>(null); // ← for DOM extraction
+  const trackedRef = useRef<HTMLDivElement>(null);
 
   const {
     documents,
@@ -51,7 +51,6 @@ export function EditorUI() {
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(true);
 
-  // Auto-name document
   useEffect(() => {
     if (!documentName && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
@@ -59,25 +58,16 @@ export function EditorUI() {
     }
   }, [inputText, documentName]);
 
-  // 🔁 EXACT REPLICATION of extractCleanTextFromTrackedDOM from editor.js
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
     if (!trackedRef.current) return editedText;
 
     const clone = trackedRef.current.cloneNode(true) as HTMLElement;
-
-    // Remove UI buttons
     clone.querySelectorAll('.change-action').forEach(el => el.remove());
-
-    // Remove <del> (rejected content)
     clone.querySelectorAll('del').forEach(el => el.remove());
-
-    // Replace <ins> with plain text
     clone.querySelectorAll('ins').forEach(el => {
       const text = document.createTextNode(el.textContent || '');
       el.replaceWith(text);
     });
-
-    // Unwrap .change-group
     clone.querySelectorAll('.change-group').forEach(group => {
       while (group.firstChild) {
         group.parentNode?.insertBefore(group.firstChild, group);
@@ -113,43 +103,31 @@ export function EditorUI() {
     URL.revokeObjectURL(url);
   };
 
-  const handleAcceptChange = useCallback(() => {
-    // TrackedChangesView handles DOM update
-    // We’ll extract fresh text on save/copy
-  }, []);
+  const handleAcceptChange = useCallback(() => {}, []);
+  const handleRejectChange = useCallback(() => {}, []);
 
-  const handleRejectChange = useCallback(() => {
-    // Same
-  }, []);
-
-  // ✅ SAVE HANDLERS: Extract final text at save time
   const handleSaveDocument = async () => {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
-
     if (!original.trim() || !final.trim()) {
       alert('No valid content to save. Please run “Edit” first.');
       return;
     }
-
     await saveDocument(final, original);
   };
 
   const handleSaveProgress = async () => {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
-
     if (!original.trim() || !final.trim()) {
       alert('No valid content to save.');
       return;
     }
-
     await saveProgress(final, original);
   };
 
   return (
     <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6">
-      {/* Input Section */}
       <div>
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-semibold">Original Text</h2>
@@ -165,7 +143,6 @@ export function EditorUI() {
         />
       </div>
 
-      {/* Editing Controls */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <h3 className="font-medium mb-2">Editing Level</h3>
@@ -222,7 +199,6 @@ export function EditorUI() {
         </div>
       </div>
 
-      {/* Document Management */}
       <div className="border-t border-gray-300 pt-4">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">Document Management</h2>
@@ -316,7 +292,6 @@ export function EditorUI() {
         )}
       </div>
 
-      {/* Edit Button — renamed from "Apply Edit" */}
       <div>
         <button
           id="edit-btn"
@@ -334,7 +309,6 @@ export function EditorUI() {
         {docError && <p className="mt-2 text-red-600 text-sm">{docError}</p>}
       </div>
 
-      {/* Result Section */}
       {(editedText || isLoading) && (
         <div>
           <div className="flex justify-between items-center mb-2">
@@ -380,7 +354,6 @@ export function EditorUI() {
             </button>
           </div>
 
-          {/* ⚠️ Critical: Wrap with trackedRef */}
           <div
             ref={trackedRef}
             className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm"

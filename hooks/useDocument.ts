@@ -42,7 +42,6 @@ export function useDocument() {
     fetchDocuments();
   }, [fetchDocuments]);
 
-  // ✅ ACCEPT finalText as input — don't assume editedText is valid
   const saveDocument = useCallback(async (finalText: string, originalText: string) => {
     if (!originalText.trim() || !finalText.trim()) {
       setError('Both original and edited text are required.');
@@ -146,8 +145,6 @@ export function useDocument() {
       customInstruction: doc.custom_instruction,
     });
   }, [editor]);
-
-  // Auto-save: now also uses DOM-derived text (handled in EditorUI)
 
   return {
     documents,

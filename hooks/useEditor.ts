@@ -119,7 +119,7 @@ export function useEditor() {
     });
   };
 
-  // --- Apply Edit (unchanged)
+  // --- Apply Edit
   const applyEdit = async () => {
     const {
       inputText,
@@ -181,7 +181,7 @@ export function useEditor() {
     setSelectedModel,
     setIsEditorialBoard,
     setViewMode,
-    setDocumentId, // ← NEW
+    setDocumentId,
     loadDocument,
     applyEdit,
     reset,

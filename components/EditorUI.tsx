@@ -12,37 +12,6 @@ const BASE_MODELS = [
   { id: 'google/gemini-flash-1.5-8b:free', name: 'Gemini Flash 1.5' },
 ];
 
-// 🔍 Wrapper to log TrackedChangesView props
-function TrackedChangesViewWithLogs({
-  originalText,
-  editedText,
-  onAcceptChange,
-  onRejectChange,
-}: {
-  originalText: string;
-  editedText: string;
-  onAcceptChange: () => void;
-  onRejectChange: () => void;
-}) {
-  useEffect(() => {
-    console.log('[TrackedChangesView] Props updated:', {
-      originalTextLength: originalText?.length || 0,
-      editedTextLength: editedText?.length || 0,
-      originalPreview: originalText?.substring(0, 60) || '',
-      editedPreview: editedText?.substring(0, 60) || '',
-    });
-  }, [originalText, editedText]);
-
-  return (
-    <TrackedChangesView
-      originalText={originalText}
-      editedText={editedText}
-      onAcceptChange={onAcceptChange}
-      onRejectChange={onRejectChange}
-    />
-  );
-}
-
 export function EditorUI() {
   const editor = useEditor();
   const docManager = useDocument();
@@ -82,7 +51,6 @@ export function EditorUI() {
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(true);
 
-  // ✅ Auto-generate name ONLY if user hasn't typed anything
   useEffect(() => {
     if (!documentName.trim() && inputText.trim()) {
       const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
@@ -90,25 +58,11 @@ export function EditorUI() {
     }
   }, [inputText]);
 
-  // 🔍 LOG: Track key state changes
-  useEffect(() => {
-    console.log('[EditorUI] 📡 State updated:', {
-      documentId,
-      inputTextLength: inputText.length,
-      editedTextLength: editedText.length,
-      wordCount,
-      changeCount,
-      viewMode,
-      isLoading,
-    });
-  }, [documentId, inputText, editedText, wordCount, changeCount, viewMode, isLoading]);
-
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
     if (!trackedRef.current) return editedText;
 
     const clone = trackedRef.current.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('.change-action').forEach(el => el.remove());
-    clone.querySelectorAll('del').forEach(el => el.remove());
+    clone.querySelectorAll('.change-action, del').forEach(el => el.remove());
     clone.querySelectorAll('ins').forEach(el => {
       const text = document.createTextNode(el.textContent || '');
       el.replaceWith(text);
@@ -129,7 +83,7 @@ export function EditorUI() {
     try {
       await navigator.clipboard.writeText(textToCopy);
       alert('✅ Copied!');
-    } catch (err) {
+    } catch {
       alert('Failed to copy.');
     }
   };
@@ -141,7 +95,7 @@ export function EditorUI() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `edited-document-${new Date().toISOString().slice(0,10)}.txt`;
+    a.download = `edited-document-${new Date().toISOString().slice(0, 10)}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -151,7 +105,6 @@ export function EditorUI() {
   const handleAcceptChange = useCallback(() => {}, []);
   const handleRejectChange = useCallback(() => {}, []);
 
-  // ✅ Save full document (new)
   const handleSaveDocument = async () => {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
@@ -159,7 +112,6 @@ export function EditorUI() {
       alert('No valid content to save. Please run “Edit” first.');
       return;
     }
-    // ✅ Pass (final, original, name)
     const id = await saveDocument(final, original, documentName);
     if (id) {
       editor.setDocumentId(id);
@@ -167,7 +119,6 @@ export function EditorUI() {
     }
   };
 
-  // ✅ Save progress (update existing)
   const handleSaveProgress = async () => {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
@@ -175,23 +126,10 @@ export function EditorUI() {
       alert('No valid content or active document to update.');
       return;
     }
-    // ✅ Pass (id, final, original)
-    const success = await saveProgress(documentId, final, original);
-    if (success) {
-      console.log('[EditorUI] Progress saved');
-    }
+    await saveProgress(documentId, final, original);
   };
 
-  // ✅ Load document directly into editor
   const handleDocumentClick = (doc: SavedDocument) => {
-    console.log('[EditorUI] 🖱️ Document clicked:', {
-      id: doc.id,
-      name: doc.name,
-      originalTextLength: doc.original_text.length,
-      editedTextLength: doc.edited_text.length,
-    });
-
-    // ✅ Call editor.loadDocument directly
     editor.loadDocument(doc.id, {
       originalText: doc.original_text,
       editedText: doc.edited_text,
@@ -437,7 +375,7 @@ export function EditorUI() {
             {viewMode === 'clean' ? (
               editedText || 'Result will appear here...'
             ) : (
-              <TrackedChangesViewWithLogs
+              <TrackedChangesView
                 key={documentId || 'new'}
                 originalText={inputText}
                 editedText={editedText}

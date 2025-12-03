@@ -328,7 +328,7 @@ export function EditorUI() {
 
           <div
             className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm"
-            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
+style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap', color: '#000' }}
           >
             {viewMode === 'clean' ? (
               editedText || 'Result will appear here...'

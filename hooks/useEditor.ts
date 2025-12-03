@@ -17,7 +17,7 @@ export interface EditorState {
   error: string | null;
   viewMode: 'clean' | 'tracked';
   isEditorialBoard: boolean;
-  documentId: string | null; // ← NEW
+  documentId: string | null;
   wordCount: number;
 }
 
@@ -36,59 +36,65 @@ export function useEditor() {
     error: null,
     viewMode: 'clean',
     isEditorialBoard: false,
-    documentId: null, // ← NEW
+    documentId: null,
     wordCount: 0,
   });
 
+  // Auto-update word count
   useEffect(() => {
-    const words = state.inputText.trim() ? state.inputText.trim().split(/\s+/).filter(Boolean).length : 0;
+    const words = state.inputText.trim()
+      ? state.inputText.trim().split(/\s+/).filter(Boolean).length
+      : 0;
     if (state.wordCount !== words) {
-      setState(prev => ({ ...prev, wordCount: words }));
+      setState((prev) => ({ ...prev, wordCount: words }));
     }
   }, [state.inputText]);
 
-  // --- Setters ---
-  const setInputText = (text: string) => {
-    setState(prev => ({ ...prev, inputText: text }));
-  };
+  // --- Setters (all use functional updates for consistency) ---
+  const setInputText = (text: string) =>
+    setState((prev) => ({ ...prev, inputText: text }));
 
-  const setEditLevel = (level: EditLevel) => {
-    setState(prev => ({ ...prev, editLevel: level }));
-  };
+  const setEditLevel = (level: EditLevel) =>
+    setState((prev) => ({ ...prev, editLevel: level }));
 
-  const setCustomInstruction = (instruction: string) => {
-    setState(prev => ({ ...prev, customInstruction: instruction }));
-  };
+  const setCustomInstruction = (instruction: string) =>
+    setState((prev) => ({ ...prev, customInstruction: instruction }));
 
-  const setSelectedModel = (model: string) => {
-    setState(prev => ({ ...prev, selectedModel: model }));
-  };
+  const setSelectedModel = (model: string) =>
+    setState((prev) => ({ ...prev, selectedModel: model }));
 
-  const setIsEditorialBoard = (enabled: boolean) => {
-    setState(prev => ({ ...prev, isEditorialBoard: enabled }));
-  };
+  const setIsEditorialBoard = (enabled: boolean) =>
+    setState((prev) => ({ ...prev, isEditorialBoard: enabled }));
 
-  const setViewMode = (mode: 'clean' | 'tracked') => {
-    setState(prev => ({ ...prev, viewMode: mode }));
-  };
+  const setViewMode = (mode: 'clean' | 'tracked') =>
+    setState((prev) => ({ ...prev, viewMode: mode }));
 
-  const setDocumentId = (id: string | null) => {
-    setState(prev => ({ ...prev, documentId: id }));
-  }; // ← NEW
+  const setDocumentId = (id: string | null) =>
+    setState((prev) => ({ ...prev, documentId: id }));
 
-  // --- Load a full document (called by useDocument or page)
-  const loadDocument = (documentId: string, docData: {
-    originalText: string;
-    editedText: string;
-    level?: string;
-    model?: string;
-    customInstruction?: string;
-  }) => {
-    setState({
+  // --- Load a full document (called by useDocument)
+  const loadDocument = (
+    documentId: string,
+    docData: {
+      originalText: string;
+      editedText: string;
+      level?: string;
+      model?: string;
+      customInstruction?: string;
+    }
+  ) => {
+    console.log('[useEditor] loadDocument called with:', {
+      documentId,
+      originalTextLength: docData.originalText?.length || 0,
+      editedTextLength: docData.editedText?.length || 0,
+    });
+
+    setState((prev) => ({
+      ...prev, // 👈 Preserve other state if needed (though we usually replace all)
       inputText: docData.originalText || '',
       editedText: docData.editedText || '',
-      trackedHtml: '', // Will be regenerated on view switch or via applyEdit
-      changeCount: 0,
+      trackedHtml: '', // Will be regenerated when needed
+      changeCount: 0, // Note: real count comes from applyEdit or diffing
       editLevel: (docData.level as EditLevel) || 'proofread',
       customInstruction: docData.customInstruction || '',
       selectedModel: docData.model || DEFAULT_MODEL,
@@ -97,12 +103,15 @@ export function useEditor() {
       viewMode: 'tracked',
       isEditorialBoard: false,
       documentId: documentId,
-      wordCount: (docData.originalText?.trim()?.split(/\s+/)?.filter(Boolean)?.length) || 0,
-    });
+      wordCount:
+        docData.originalText?.trim()?.split(/\s+/)?.filter(Boolean)?.length || 0,
+    }));
   };
 
+  // --- Reset editor
   const reset = () => {
-    setState({
+    setState((prev) => ({
+      ...prev,
       inputText: '',
       editedText: '',
       trackedHtml: '',
@@ -116,30 +125,24 @@ export function useEditor() {
       isEditorialBoard: false,
       documentId: null,
       wordCount: 0,
-    });
+    }));
   };
 
-  // --- Apply Edit
+  // --- Apply Edit via API
   const applyEdit = async () => {
-    const {
-      inputText,
-      editLevel,
-      customInstruction,
-      selectedModel,
-      isEditorialBoard,
-    } = state;
+    const { inputText, editLevel, customInstruction, selectedModel, isEditorialBoard } = state;
 
     if (!inputText.trim()) {
-      setState(prev => ({ ...prev, error: 'Please enter text to edit.' }));
+      setState((prev) => ({ ...prev, error: 'Please enter text to edit.' }));
       return;
     }
 
     if (editLevel === 'custom' && !customInstruction.trim()) {
-      setState(prev => ({ ...prev, error: 'Custom instruction is required.' }));
+      setState((prev) => ({ ...prev, error: 'Custom instruction is required.' }));
       return;
     }
 
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
       const res = await fetch('/api/edit', {
@@ -161,7 +164,7 @@ export function useEditor() {
       }
 
       const result = await res.json();
-      setState(prev => ({
+      setState((prev) => ({
         ...prev,
         editedText: result.editedText,
         trackedHtml: result.trackedHtml,
@@ -169,7 +172,7 @@ export function useEditor() {
         isLoading: false,
       }));
     } catch (err: any) {
-      setState(prev => ({ ...prev, isLoading: false, error: err.message }));
+      setState((prev) => ({ ...prev, isLoading: false, error: err.message }));
     }
   };
 
@@ -191,16 +194,16 @@ export function useEditor() {
 function getInstructionForLevel(level: EditLevel): string {
   switch (level) {
     case 'proofread':
-      return "Fix spelling/grammar ONLY. Preserve tone. Return text.";
+      return 'Fix spelling/grammar ONLY. Preserve tone. Return text.';
     case 'rewrite':
-      return "Improve clarity and flow while preserving core meaning.";
+      return 'Improve clarity and flow while preserving core meaning.';
     case 'formal':
-      return "Convert to professional, formal tone. Remove slang and contractions.";
+      return 'Convert to professional, formal tone. Remove slang and contractions.';
     case 'custom':
-      return "";
+      return '';
     case 'generate':
-      return "Generate a complete blog post.";
+      return 'Generate a complete blog post.';
     default:
-      return "";
+      return '';
   }
 }

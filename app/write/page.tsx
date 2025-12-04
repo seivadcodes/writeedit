@@ -4,7 +4,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// --- Supabase ---
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -55,14 +54,12 @@ const HISTORY_OPTIONS = {
   THROTTLE_DELAY: 300,
 };
 
-// --- Escape HTML (for rendering in JSX strings) ---
 const escapeHtml = (text: string): string => {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 };
 
-// --- Time formatting ---
 const formatTimeAgo = (date: Date): string => {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -85,6 +82,7 @@ export default function WritePage() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
+  const variationPickerRef = useRef<HTMLDivElement | null>(null);
 
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
@@ -544,20 +542,7 @@ export default function WritePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
 
-  // --- Initial load ---
-  useEffect(() => {
-    loadAllDrafts();
-    resetHistory();
-    captureHistoryState();
-    updateWordCount();
-
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
-    };
-  }, []);
-
-  // --- AI Functions (simplified – only Spark shown fully) ---
+  // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
       method: 'POST',
@@ -571,6 +556,129 @@ export default function WritePage() {
     return await res.json();
   };
 
+  const showVariationPicker = (
+    originalText: string,
+    variations: string[],
+    onChoose: (text: string) => void,
+    onCancel: () => void
+  ) => {
+    // Close existing
+    if (variationPickerRef.current) {
+      variationPickerRef.current.remove();
+      variationPickerRef.current = null;
+    }
+
+    const modal = document.createElement('div');
+    variationPickerRef.current = modal;
+    modal.id = 'variation-picker-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 80px;
+      z-index: 10000;
+    `;
+
+    const picker = document.createElement('div');
+    picker.style.cssText = `
+      background: white;
+      border-radius: 12px;
+      max-width: 640px;
+      width: 90%;
+      max-height: 70vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      padding: 20px;
+      font-family: var(--font-spectral), serif;
+      font-size: 1.05em;
+      line-height: 1.6;
+    `;
+
+    picker.innerHTML = `
+      <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <strong>Choose the best version</strong>
+        <button id="picker-cancel" style="background:#f5f5f5; border:1px solid #ddd; border-radius:4px; padding:4px 8px; cursor:pointer; font-size:1.2em;">✕</button>
+      </div>
+      <div style="margin-bottom: 12px; color: #666; font-size: 0.95em;">Original:</div>
+      <div style="background:#f9f9f9; padding:12px; border-radius:6px; margin-bottom:20px; font-style:italic;">${escapeHtml(originalText)}</div>
+      <div id="variations-list"></div>
+    `;
+
+    const list = picker.querySelector('#variations-list')!;
+    variations
+      .map(t => t.trim())
+      .filter(Boolean)
+      .forEach(text => {
+        const item = document.createElement('div');
+        item.style.cssText = `
+          padding: 12px;
+          border: 1px solid #eee;
+          border-radius: 6px;
+          margin-bottom: 10px;
+          cursor: pointer;
+          transition: background 0.2s;
+        `;
+        item.textContent = text;
+        item.addEventListener('click', () => {
+          modal.remove();
+          variationPickerRef.current = null;
+          onChoose(text);
+        });
+        item.addEventListener('mouseenter', () => item.style.background = '#f0f7ff');
+        item.addEventListener('mouseleave', () => item.style.background = '');
+        list.appendChild(item);
+      });
+
+    if (list.children.length === 0) {
+      list.innerHTML = '<div style="color:#888;">No valid variations received.</div>';
+    }
+
+    picker.querySelector('#picker-cancel')!.addEventListener('click', () => {
+      modal.remove();
+      variationPickerRef.current = null;
+      onCancel();
+    });
+
+    modal.appendChild(picker);
+    document.body.appendChild(modal);
+  };
+
+  const insertTextAtCursor = (el: HTMLDivElement, text: string) => {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      range.collapse(false);
+      range.insertNode(document.createTextNode(text));
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      el.textContent += text;
+    }
+  };
+
+  const applyChosenText = (chosen: string, hadSelection: boolean, canvas: HTMLDivElement) => {
+    if (hadSelection) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        if (!range.collapsed) {
+          range.deleteContents();
+          range.insertNode(document.createTextNode(chosen));
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+      }
+    }
+    canvas.textContent = chosen;
+  };
+
+  // --- Handle AI Operations ---
   const handleGenerateSpark = async () => {
     if (!canvasRef.current || !titleRef.current) return;
     captureHistoryState();
@@ -578,8 +686,8 @@ export default function WritePage() {
     const title = titleRef.current.value.trim() || 'Untitled';
     const isEmpty = !(canvasRef.current.textContent?.trim());
     const prompt = isEmpty
-      ? `Write ONLY ONE vivid, engaging sentence to start a piece titled "${title}". No quotes, no markdown, no extra text.`
-      : `Write ONLY ONE natural next sentence to continue this piece titled "${title}". Do not summarize or conclude. Just one sentence. No quotes, no markdown.`;
+      ? `You are a master storyteller. Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`
+      : `You are a master storyteller. Based on the title "${title}", write ONLY ONE natural, flowing sentence that continues the narrative. DO NOT summarize, conclude, or add commentary. DO NOT use quotes, markdown, or JSON. Return ONLY the sentence, ending with a period.`;
 
     try {
       updateAutosaveStatus('✨ Generating spark...', 'saving');
@@ -588,7 +696,16 @@ export default function WritePage() {
         model: 'x-ai/grok-4.1-fast:free',
         editLevel: 'generate',
       });
+
       let text = data.generatedPost?.content || data.generatedPost || data.editedText || '';
+
+      if (text.startsWith('{') && text.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(text);
+          text = parsed.excerpt || parsed.content || parsed.generatedPost || '';
+        } catch {}
+      }
+
       const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
       let sentence = firstSentenceMatch
         ? firstSentenceMatch[0]
@@ -597,17 +714,9 @@ export default function WritePage() {
 
       setIsApplyingHistory(true);
       if (isEmpty) {
-        if (canvasRef.current) canvasRef.current.textContent = sentence + ' ';
+        canvasRef.current.textContent = sentence + ' ';
       } else {
-        const sel = window.getSelection();
-        if (sel && sel.rangeCount > 0) {
-          const range = sel.getRangeAt(0);
-          range.collapse(false);
-          range.insertNode(document.createTextNode(' ' + sentence + ' '));
-          range.collapse(false);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
+        insertTextAtCursor(canvasRef.current, ' ' + sentence + ' ');
       }
       setIsApplyingHistory(false);
       captureHistoryState();
@@ -625,243 +734,272 @@ export default function WritePage() {
     }
   };
 
+  const getSelectedOrFullText = (): { text: string; hasSelection: boolean } => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { text: '', hasSelection: false };
+
+    let selectedText = '';
+    let hasSelection = false;
+
+    if (restoreSavedSelection()) {
+      selectedText = window.getSelection()?.toString().trim() || '';
+      hasSelection = selectedText.length > 0;
+    } else {
+      const selection = window.getSelection();
+      selectedText = selection?.toString().trim() || '';
+      hasSelection = selectedText.length > 0;
+    }
+
+    const fullText = canvas.textContent.trim();
+    return {
+      text: hasSelection ? selectedText : fullText,
+      hasSelection: hasSelection && selectedText.length > 0,
+    };
+  };
+
+  const handleRewriteSelection = async () => {
+    const { text, hasSelection } = getSelectedOrFullText();
+    if (!text) {
+      showToast('No text to rewrite', 'info');
+      return;
+    }
+    if (hasSelection && text.split(' ').length > 50) {
+      showToast('Please select ≤50 words for best results', 'info');
+      return;
+    }
+
+    captureHistoryState();
+    setIsAiOperation(true);
+
+    try {
+      updateAutosaveStatus('🧠 Generating rewrites...', 'saving');
+      const data = await callAiApi({
+        input: text,
+        instruction: 'Rewrite this in fresh, clear language with the same meaning. Keep similar length. Return ONLY the rewritten text, nothing else.',
+        model: 'x-ai/grok-4.1-fast:free',
+        editLevel: 'rewrite',
+        numVariations: 3,
+      });
+
+      const variations = Array.isArray(data.variations)
+        ? data.variations
+        : [data.editedText || data.generatedPost].filter(Boolean);
+
+      if (!variations.length) throw new Error('No output');
+
+      showVariationPicker(text, variations, (chosen) => {
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          canvas.focus();
+          const finalHasSelection = hasSelection && restoreSavedSelection();
+          setIsApplyingHistory(true);
+          applyChosenText(chosen, finalHasSelection, canvas);
+          setIsApplyingHistory(false);
+          captureHistoryState();
+          setIsDirty(true);
+          updateWordCount();
+          updateAutosaveStatus('Rewritten!', 'saved');
+          showToast('✅ Rewritten!', 'success');
+        }
+        currentSelectionRangeRef.current = null;
+      }, () => {
+        updateAutosaveStatus('Canceled', 'info');
+        currentSelectionRangeRef.current = null;
+      });
+    } catch (err) {
+      console.error('Rewrite failed:', err);
+      showToast('Rewrite failed – try again', 'error');
+      updateAutosaveStatus('Rewrite failed', 'error');
+      currentSelectionRangeRef.current = null;
+    } finally {
+      setIsAiOperation(false);
+    }
+  };
+
+  const handleAdjustTone = async () => {
+    const { text, hasSelection } = getSelectedOrFullText();
+    if (!hasSelection) {
+      showToast('Select text to adjust tone', 'info');
+      return;
+    }
+
+    captureHistoryState();
+    setIsAiOperation(true);
+
+    try {
+      updateAutosaveStatus('🎭 Generating tones...', 'saving');
+      const data = await callAiApi({
+        input: text,
+        instruction: 'Rewrite this to sound formal and professional. Keep the core meaning. Return ONLY the rewritten text, nothing else.',
+        model: 'x-ai/grok-4.1-fast:free',
+        editLevel: 'tone',
+        numVariations: 3,
+      });
+
+      const variations = Array.isArray(data.variations)
+        ? data.variations
+        : [data.editedText || data.generatedPost].filter(Boolean);
+
+      showVariationPicker(text, variations, (chosen) => {
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          canvas.focus();
+          const finalHasSelection = restoreSavedSelection();
+          setIsApplyingHistory(true);
+          applyChosenText(chosen, finalHasSelection, canvas);
+          setIsApplyingHistory(false);
+          captureHistoryState();
+          setIsDirty(true);
+          updateWordCount();
+          updateAutosaveStatus('Tone adjusted!', 'saved');
+          showToast('✅ Tone adjusted!', 'success');
+        }
+        currentSelectionRangeRef.current = null;
+      }, () => {
+        updateAutosaveStatus('Canceled', 'info');
+        currentSelectionRangeRef.current = null;
+      });
+    } catch (err) {
+      console.error('Tone failed:', err);
+      showToast('Tone adjustment failed – try again', 'error');
+      updateAutosaveStatus('Tone failed', 'error');
+      currentSelectionRangeRef.current = null;
+    } finally {
+      setIsAiOperation(false);
+    }
+  };
+
+  const handleExpandText = async () => {
+    const { text, hasSelection } = getSelectedOrFullText();
+    if (!hasSelection) {
+      showToast('Select text to expand', 'info');
+      return;
+    }
+    if (text.split(' ').length > 50) {
+      showToast('Select ≤50 words to expand', 'info');
+      return;
+    }
+
+    captureHistoryState();
+    setIsAiOperation(true);
+
+    try {
+      updateAutosaveStatus('📈 Generating expansions...', 'saving');
+      const data = await callAiApi({
+        input: text,
+        instruction: 'Expand this text by adding more detail, examples, or explanation. Make it roughly 2–3 times longer while keeping the original meaning. Return ONLY the expanded text, nothing else.',
+        model: 'x-ai/grok-4.1-fast:free',
+        editLevel: 'expand',
+        numVariations: 3,
+      });
+
+      const variations = Array.isArray(data.variations)
+        ? data.variations
+        : [data.editedText || data.generatedPost].filter(Boolean);
+
+      showVariationPicker(text, variations, (chosen) => {
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          canvas.focus();
+          const finalHasSelection = restoreSavedSelection();
+          setIsApplyingHistory(true);
+          applyChosenText(chosen, finalHasSelection, canvas);
+          setIsApplyingHistory(false);
+          captureHistoryState();
+          setIsDirty(true);
+          updateWordCount();
+          updateAutosaveStatus('Text expanded!', 'saved');
+          showToast('✅ Text expanded!', 'success');
+        }
+        currentSelectionRangeRef.current = null;
+      }, () => {
+        updateAutosaveStatus('Canceled', 'info');
+        currentSelectionRangeRef.current = null;
+      });
+    } catch (err) {
+      console.error('Expand failed:', err);
+      showToast('Expansion failed – try again', 'error');
+      updateAutosaveStatus('Expansion failed', 'error');
+      currentSelectionRangeRef.current = null;
+    } finally {
+      setIsAiOperation(false);
+    }
+  };
+
+  const handleCondenseText = async () => {
+    const { text, hasSelection } = getSelectedOrFullText();
+    if (!hasSelection) {
+      showToast('Select text to condense', 'info');
+      return;
+    }
+    if (text.split(' ').length < 15) {
+      showToast('Text is too short to condense effectively', 'info');
+      return;
+    }
+
+    captureHistoryState();
+    setIsAiOperation(true);
+
+    try {
+      updateAutosaveStatus('📉 Generating condensed versions...', 'saving');
+      const data = await callAiApi({
+        input: text,
+        instruction: 'Condense this text by removing redundant words and phrases, making it as concise as possible while preserving the core meaning. Aim for half the length. Return ONLY the condensed text, nothing else.',
+        model: 'x-ai/grok-4.1-fast:free',
+        editLevel: 'condense',
+        numVariations: 3,
+      });
+
+      const variations = Array.isArray(data.variations)
+        ? data.variations
+        : [data.editedText || data.generatedPost].filter(Boolean);
+
+      showVariationPicker(text, variations, (chosen) => {
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          canvas.focus();
+          const finalHasSelection = restoreSavedSelection();
+          setIsApplyingHistory(true);
+          applyChosenText(chosen, finalHasSelection, canvas);
+          setIsApplyingHistory(false);
+          captureHistoryState();
+          setIsDirty(true);
+          updateWordCount();
+          updateAutosaveStatus('Text condensed!', 'saved');
+          showToast('✅ Text condensed!', 'success');
+        }
+        currentSelectionRangeRef.current = null;
+      }, () => {
+        updateAutosaveStatus('Canceled', 'info');
+        currentSelectionRangeRef.current = null;
+      });
+    } catch (err) {
+      console.error('Condense failed:', err);
+      showToast('Condensation failed – try again', 'error');
+      updateAutosaveStatus('Condensation failed', 'error');
+      currentSelectionRangeRef.current = null;
+    } finally {
+      setIsAiOperation(false);
+    }
+  };
+
+  // --- Initial load ---
+  useEffect(() => {
+    loadAllDrafts();
+    resetHistory();
+    captureHistoryState();
+    updateWordCount();
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
+      if (variationPickerRef.current) variationPickerRef.current.remove();
+    };
+  }, []);
+
   // --- Render UI ---
   return (
     <div className="writing-app">
-      <style jsx global>{`
-        .writing-app {
-          display: flex;
-          height: 100vh;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Spectral', serif;
-          background: #f9f9f9;
-          flex-direction: column;
-        }
-        .drafts-sidebar {
-          display: none;
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: white;
-          z-index: 1000;
-          flex-direction: column;
-        }
-        .drafts-sidebar.active {
-          display: flex;
-        }
-        .sidebar-header {
-          padding: 16px;
-          border-bottom: 1px solid #eee;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .sidebar-header h3 {
-          margin: 0;
-          font-size: 1em;
-          color: #333;
-        }
-        #close-sidebar-btn {
-          background: none;
-          border: none;
-          font-size: 1.4em;
-          padding: 4px 8px;
-          cursor: pointer;
-          color: #888;
-        }
-        .drafts-list {
-          flex: 1;
-          overflow-y: auto;
-          padding: 8px 0;
-        }
-        .draft-item {
-          padding: 12px 16px;
-          cursor: pointer;
-          border-bottom: 1px solid #f5f5f5;
-          font-size: 0.95em;
-          color: #333;
-        }
-        .draft-item:hover {
-          background: #f0f7ff;
-        }
-        .draft-item.active {
-          background: #e3f2fd;
-          font-weight: 600;
-        }
-        .writing-main {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          min-height: 0;
-        }
-        .writing-header {
-          padding: 12px 16px;
-          border-bottom: 1px solid #eee;
-          background: white;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-        #draft-title {
-          font-size: 1.25em;
-          font-weight: 600;
-          border: none;
-          outline: none;
-          font-family: inherit;
-          color: #222;
-          padding: 8px 0;
-          width: 100%;
-        }
-        .mobile-drafts-toggle {
-          background: #f0f0f0;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          padding: 6px 12px;
-          font-size: 0.9em;
-          color: #444;
-          cursor: pointer;
-          align-self: flex-start;
-          font-weight: 500;
-        }
-        .ai-controls-group {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .ai-btn {
-          padding: 8px 12px;
-          border: 1px solid #ddd;
-          background: white;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 0.9em;
-          color: #333;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          flex: 1;
-          min-width: 90px;
-          text-align: center;
-        }
-        .ai-btn:hover {
-          background: #f8f9fa;
-        }
-        .header-actions {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          flex-wrap: wrap;
-          justify-content: space-between;
-          width: 100%;
-        }
-        .history-controls {
-          display: flex;
-          gap: 8px;
-        }
-        .history-btn {
-          padding: 6px 12px;
-          border: 1px solid #ddd;
-          background: white;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 1em;
-          min-width: 36px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .autosave-status {
-          color: #666;
-          font-size: 0.85em;
-          white-space: nowrap;
-        }
-        .autosave-saved { color: #2e7d32; }
-        .autosave-saving { color: #1976d2; }
-        .autosave-error { color: #d32f2f; }
-        .autosave-unsaved { color: #ed6c02; }
-        .writing-canvas {
-          flex: 1;
-          padding: 24px 16px;
-          font-size: 1.1em;
-          line-height: 1.6;
-          outline: none;
-          white-space: pre-wrap;
-          word-wrap: break-word;
-          color: #111;
-          caret-color: #1976d2;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
-        }
-        .writing-canvas:focus { outline: none; }
-        .writing-canvas:empty::before {
-          content: attr(data-placeholder);
-          color: #aaa;
-          pointer-events: none;
-          font-style: italic;
-        }
-        .writing-footer {
-          padding: 10px 16px;
-          border-top: 1px solid #eee;
-          display: flex;
-          justify-content: space-between;
-          color: #666;
-          font-size: 0.85em;
-          background: white;
-        }
-        .btn {
-          padding: 6px 12px;
-          border: 1px solid #ddd;
-          background: white;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 0.9em;
-          color: #333;
-        }
-        .btn-primary {
-          background: #1976d2;
-          color: white;
-          border: none;
-        }
-        .btn-primary:hover {
-          background: #1565c0;
-        }
-        @media (min-width: 769px) {
-          .writing-app {
-            flex-direction: row;
-          }
-          .mobile-drafts-toggle {
-            display: none;
-          }
-          .drafts-sidebar {
-            display: flex;
-            position: static;
-            width: 240px;
-            border-right: 1px solid #eee;
-          }
-          .writing-header {
-            flex-direction: row;
-            padding: 16px 24px;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 16px;
-          }
-          #draft-title {
-            font-size: 1.4em;
-            min-width: 200px;
-            flex: 1;
-          }
-          .writing-canvas {
-            padding: 60px 40px;
-            max-width: 720px;
-            margin: 0 auto;
-          }
-          .header-actions {
-            justify-content: flex-end;
-          }
-        }
-      `}</style>
-
       {/* Sidebar */}
       <div className={`drafts-sidebar ${sidebarOpen ? 'active' : ''}`}>
         <div className="sidebar-header">
@@ -915,7 +1053,6 @@ export default function WritePage() {
             type="text"
             ref={titleRef}
             placeholder="Untitled Draft"
-            className="draft-title-input"
             defaultValue="Untitled Draft"
             id="draft-title"
           />
@@ -927,7 +1064,20 @@ export default function WritePage() {
               <button className="btn ai-btn" onClick={handleGenerateSpark}>
                 ✨ Spark
               </button>
-              {/* Add other AI buttons similarly */}
+              <button className="btn ai-btn" onClick={handleRewriteSelection}>
+                🧠 Rewrite
+              </button>
+              <button className="btn ai-btn" onClick={handleAdjustTone}>
+                🎭 Tone
+              </button>
+            </div>
+            <div className="ai-controls-bottom">
+              <button className="btn ai-btn" onClick={handleExpandText}>
+                📈 Expand
+              </button>
+              <button className="btn ai-btn" onClick={handleCondenseText}>
+                📉 Condense
+              </button>
             </div>
           </div>
           <div className="header-actions">

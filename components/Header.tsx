@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase-client'; // 👈 updated import
+import { supabase } from '@/lib/supabase-client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -20,7 +20,6 @@ export function Header() {
     };
     fetchUser();
 
-    // Optional: Listen to auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
@@ -30,13 +29,15 @@ export function Header() {
     };
   }, []);
 
-  const handleAuth = async () => {
+  const handleAuth = () => {
     if (user) {
-      await supabase.auth.signOut();
-      router.refresh();
+      // Logout
+      supabase.auth.signOut().then(() => {
+        router.refresh();
+      });
     } else {
-      // Replace with modal later
-      alert('Login modal would open here');
+      // Redirect to sign-in page (you can later enhance this with a modal)
+      router.push('/auth/signin');
     }
   };
 

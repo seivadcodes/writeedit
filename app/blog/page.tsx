@@ -12,6 +12,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// --- Fixed: Re-fetch user ID before critical operations ---
 async function getCurrentUserId() {
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id || null;
@@ -120,10 +121,10 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
     loadData();
   }, [postId, router]);
 
-  // --- Upload image to Supabase ---
-  const uploadImage = async (file: File): Promise<string> => {
-    if (!currentUser) throw new Error('Not authenticated');
-    const filePath = `blog/${currentUser}/${Date.now()}_${file.name}`;
+  // --- Fixed: Upload image with explicit user ID ---
+  const uploadImage = async (file: File, userId: string): Promise<string> => {
+    if (!userId) throw new Error('Not authenticated');
+    const filePath = `blog/${userId}/${Date.now()}_${file.name}`;
     const { error: uploadError } = await supabase.storage
       .from('blog-images')
       .upload(filePath, file, { cacheControl: '3600', upsert: false });
@@ -132,12 +133,16 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
     return data.publicUrl;
   };
 
-  // --- Save post (create or update) ---
+  // --- Fixed: Re-fetch user ID before database operations ---
   const savePost = async (data: { title: string; content: string; published: boolean; imageFile?: File }) => {
     try {
+      // Critical fix: Re-fetch current user ID immediately before operation
+      const userId = await getCurrentUserId();
+      if (!userId) throw new Error('Not authenticated');
+
       let imageUrl = '';
       if (data.imageFile) {
-        imageUrl = await uploadImage(data.imageFile);
+        imageUrl = await uploadImage(data.imageFile, userId);
       }
 
       if (editPostData?.id) {
@@ -150,12 +155,12 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
             published: data.published,
           })
           .eq('id', editPostData.id)
-          .eq('user_id', currentUser!);
+          .eq('user_id', userId); // Use fresh user ID
       } else {
         await supabase
           .from('blog_posts')
           .insert({
-            user_id: currentUser!,
+            user_id: userId, // Use fresh user ID
             title: data.title,
             content: data.content,
             image_url: imageUrl,
@@ -173,15 +178,22 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
     }
   };
 
-  // --- Delete post ---
+  // --- Fixed: Re-fetch user ID for delete operations ---
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this post permanently?')) return;
     try {
+      // Critical fix: Re-fetch current user ID
+      const userId = await getCurrentUserId();
+      if (!userId) {
+        alert('Authentication required');
+        return;
+      }
+
       const { data: postData, error: fetchErr } = await supabase
         .from('blog_posts')
         .select('image_url')
         .eq('id', id)
-        .eq('user_id', currentUser)
+        .eq('user_id', userId)
         .single();
 
       if (fetchErr || !postData) {
@@ -194,7 +206,7 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
       if (postData.image_url) {
         const filename = postData.image_url.split('/').pop();
         if (filename) {
-          await supabase.storage.from('blog-images').remove([`blog/${currentUser}/${filename}`]);
+          await supabase.storage.from('blog-images').remove([`blog/${userId}/${filename}`]);
         }
       }
 
@@ -246,10 +258,10 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
 
   // --- Helpers ---
   const openEditModal = (post?: Partial<BlogPost> | null) => {
-  setEditPostData(post || null);
-  setIsEditModalOpen(true);
-  setImagePreview(post?.image_url || null);
-};
+    setEditPostData(post || null);
+    setIsEditModalOpen(true);
+    setImagePreview(post?.image_url || null);
+  };
 
   const renderPostCard = (post: BlogPost) => {
     const formattedDate = new Date(post.created_at).toLocaleDateString();
@@ -583,15 +595,15 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
                   >
                     ↺ Regenerate
                   </button>
-                 <button
-  onClick={() => {
-    setIsAiModalOpen(false);
-    openEditModal({ title: aiGenerated.title, content: aiGenerated.content } as Partial<BlogPost>);
-  }}
-  className="flex-1 py-2 bg-green-600 text-white rounded-lg font-medium text-sm"
->
-  ✅ Use This Post
-</button>
+                  <button
+                    onClick={() => {
+                      setIsAiModalOpen(false);
+                      openEditModal({ title: aiGenerated.title, content: aiGenerated.content } as Partial<BlogPost>);
+                    }}
+                    className="flex-1 py-2 bg-green-600 text-white rounded-lg font-medium text-sm"
+                  >
+                    ✅ Use This Post
+                  </button>
                 </div>
               </div>
             )}

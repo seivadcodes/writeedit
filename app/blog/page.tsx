@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { supabase, getCurrentUserId } from '@/lib/supabase';
 
 // Types
@@ -35,10 +35,10 @@ const escapeText = (text: string): string => {
     .replace(/'/g, '&#039;');
 };
 
-export default function BlogPage() {
+export default function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }> }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const postId = searchParams.get('post');
+  const params = use(searchParams); // ✅ unwrap the promise
+  const postId = params.post;
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,8 +68,7 @@ export default function BlogPage() {
       setError(null);
 
       try {
-        // Fetch published posts
-        const {  data: pubData, error: pubError } = await supabase
+        const { data: pubData, error: pubError } = await supabase
           .from('blog_posts')
           .select('*')
           .eq('published', true)
@@ -78,9 +77,8 @@ export default function BlogPage() {
         if (pubError) throw pubError;
         setPublishedPosts(pubData || []);
 
-        // Fetch drafts if logged in
         if (currentUser) {
-          const {  data: draftData, error: draftError } = await supabase
+          const { data: draftData, error: draftError } = await supabase
             .from('blog_posts')
             .select('*')
             .eq('user_id', currentUser)
@@ -109,7 +107,7 @@ export default function BlogPage() {
     }
 
     const loadPost = async () => {
-      const {  data: postData, error } = await supabase
+      const { data: postData, error } = await supabase
         .from('blog_posts')
         .select('*')
         .eq('id', postId)
@@ -127,7 +125,6 @@ export default function BlogPage() {
     loadPost();
   }, [postId, router]);
 
-  // Upload image
   const uploadImage = async (file: File): Promise<string> => {
     if (!currentUser) throw new Error('Not authenticated');
 
@@ -144,13 +141,11 @@ export default function BlogPage() {
     return data.publicUrl;
   };
 
-  // Delete post
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this post permanently?')) return;
 
     try {
-      // Fetch image URL first
-      const {  data: postData, error: fetchError } = await supabase
+      const { data: postData, error: fetchError } = await supabase
         .from('blog_posts')
         .select('image_url')
         .eq('id', id)
@@ -162,7 +157,6 @@ export default function BlogPage() {
         return;
       }
 
-      // Delete from DB
       const { error: deleteError } = await supabase
         .from('blog_posts')
         .delete()
@@ -170,7 +164,6 @@ export default function BlogPage() {
 
       if (deleteError) throw deleteError;
 
-      // Clean up image
       if (postData.image_url) {
         const filename = postData.image_url.split('/').pop();
         if (filename) {
@@ -184,7 +177,6 @@ export default function BlogPage() {
     }
   };
 
-  // AI Generation
   const generateWithAI = async () => {
     if (!aiPrompt.trim()) {
       setAiStatus({ type: 'error', msg: 'Please enter a topic or prompt.' });
@@ -302,7 +294,6 @@ export default function BlogPage() {
   return (
     <div className="min-h-screen py-8 px-4 sm:px-6">
       <div className="max-w-6xl mx-auto">
-        {/* Drafts */}
         {currentUser && (
           <div className="mb-10 p-5 bg-blue-50 rounded-xl border border-blue-200">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
@@ -361,7 +352,6 @@ export default function BlogPage() {
           </div>
         )}
 
-        {/* Published Posts */}
         {publishedPosts.length === 0 ? (
           <div className="text-center py-12 text-gray-500">📚 No published posts yet.</div>
         ) : (
@@ -426,7 +416,6 @@ export default function BlogPage() {
         )}
       </div>
 
-      {/* AI Modal */}
       {isAiModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl w-full max-w-2xl p-6 relative">

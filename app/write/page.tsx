@@ -1027,22 +1027,24 @@ export default function WritePage() {
         </div>
         <div className="drafts-list">
           {drafts.length > 0 ? (
-            drafts.map((d) => (
-              <div
-                key={d.id}
-                className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
-                onClick={() => {
-                  loadDraft(d.id);
-                  if (window.innerWidth <= 768) setSidebarOpen(false);
-                }}
-              >
-                <span className="draft-title">{escapeHtml(d.title)}</span>
-                <span className="draft-time">{d.lastEdited}</span>
-              </div>
-            ))
-          ) : (
-            <div style={{ padding: '16px', color: '#888' }}>No drafts yet</div>
-          )}
+  drafts.map((d) => (
+    <div
+      key={d.id}
+      className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
+      onClick={() => {
+        loadDraft(d.id);
+        if (window.innerWidth <= 768) setSidebarOpen(false);
+      }}
+    >
+      <span className="draft-title">{escapeHtml(d.title)}</span>
+      <span className="draft-time">{d.lastEdited}</span>
+    </div>
+  ))
+) : (
+  <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
+    No drafts yet
+  </div>
+)}
         </div>
       </div>
 

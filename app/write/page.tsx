@@ -83,8 +83,7 @@ export default function WritePage() {
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
-  // NEW: Store selected text separately
-  const lastSelectedTextRef = useRef<string | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
@@ -100,6 +99,8 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [selectionToolbarVisible, setSelectionToolbarVisible] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState({ top: 0, left: 0 });
 
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
@@ -120,12 +121,31 @@ export default function WritePage() {
       const range = selection.getRangeAt(0);
       if (canvasRef.current.contains(range.commonAncestorContainer)) {
         currentSelectionRangeRef.current = range.cloneRange();
-        // NEW: Store selected text separately
-        lastSelectedTextRef.current = selection.toString().trim() || null;
+        showSelectionToolbar(range);
+        return;
       }
-    } else {
-      // Clear stored text if no selection
-      lastSelectedTextRef.current = null;
+    }
+    hideSelectionToolbar();
+  };
+
+  const showSelectionToolbar = (range: Range) => {
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      hideSelectionToolbar();
+      return;
+    }
+
+    const toolbarHeight = 44;
+    const top = window.scrollY + rect.top - toolbarHeight - 8;
+    const left = window.scrollX + rect.left + rect.width / 2 - 110; // approx half of 220px width
+
+    setToolbarPosition({ top: Math.max(10, top), left });
+    setSelectionToolbarVisible(true);
+  };
+
+  const hideSelectionToolbar = () => {
+    if (selectionToolbarVisible) {
+      setSelectionToolbarVisible(false);
     }
   };
 
@@ -234,7 +254,6 @@ export default function WritePage() {
       clearTimeout(pendingHistoryCaptureRef.current);
       pendingHistoryCaptureRef.current = null;
     }
-    lastSelectedTextRef.current = null; // Clear stored selection
   };
 
   const shouldCaptureHistory = () => !isApplyingHistory && !isAiOperation;
@@ -516,6 +535,7 @@ export default function WritePage() {
     setIsDirty(true);
     updateWordCount();
     currentSelectionRangeRef.current = null;
+    hideSelectionToolbar();
 
     if (currentDraftId) {
       updateAutosaveStatus('Unsaved changes', 'unsaved');
@@ -570,7 +590,8 @@ export default function WritePage() {
     onChoose: (text: string) => void,
     onCancel: () => void
   ) => {
-    // Close existing
+    hideSelectionToolbar();
+
     if (variationPickerRef.current) {
       variationPickerRef.current.remove();
       variationPickerRef.current = null;
@@ -739,46 +760,26 @@ export default function WritePage() {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
+      hideSelectionToolbar();
     }
   };
 
-  const getSelectedOrFullText = (): { text: string; hasSelection: boolean } => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { text: '', hasSelection: false };
-
-    // NEW: Focus canvas first on mobile to preserve selection
-    if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
-      canvas.focus({ preventScroll: true });
-    }
-
-    let selectedText = lastSelectedTextRef.current || '';
-    const hasSelection = selectedText.length > 0;
-    
-    // Fallback to current selection if stored text is empty
-    if (!hasSelection) {
-      const selection = window.getSelection();
-      selectedText = selection?.toString().trim() || '';
-    }
-
-    const fullText = canvas.textContent?.trim() || '';
-    return {
-      text: hasSelection ? selectedText : fullText,
-      hasSelection: hasSelection && selectedText.length > 0,
-    };
+  const getSelectedText = (): string => {
+    if (!canvasRef.current) return '';
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return '';
+    const range = selection.getRangeAt(0);
+    if (!canvasRef.current.contains(range.commonAncestorContainer)) return '';
+    return range.toString().trim();
   };
 
   const handleRewriteSelection = async () => {
-    // NEW: Ensure canvas is focused first on mobile
-    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
-      canvasRef.current.focus({ preventScroll: true });
-    }
-
-    const { text, hasSelection } = getSelectedOrFullText();
+    const text = getSelectedText();
     if (!text) {
-      showToast('No text to rewrite', 'info');
+      showToast('No text selected', 'info');
       return;
     }
-    if (hasSelection && text.split(' ').length > 50) {
+    if (text.split(' ').length > 50) {
       showToast('Please select ≤50 words for best results', 'info');
       return;
     }
@@ -806,9 +807,19 @@ export default function WritePage() {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
           canvas.focus();
-          const finalHasSelection = hasSelection && restoreSavedSelection();
+          restoreSavedSelection();
           setIsApplyingHistory(true);
-          applyChosenText(chosen, finalHasSelection, canvas);
+          const sel = window.getSelection();
+if (sel && sel.rangeCount > 0) {
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed) {
+    range.deleteContents();
+    range.insertNode(document.createTextNode(chosen));
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
           setIsApplyingHistory(false);
           captureHistoryState();
           setIsDirty(true);
@@ -832,13 +843,8 @@ export default function WritePage() {
   };
 
   const handleAdjustTone = async () => {
-    // NEW: Ensure canvas is focused first on mobile
-    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
-      canvasRef.current.focus({ preventScroll: true });
-    }
-
-    const { text, hasSelection } = getSelectedOrFullText();
-    if (!hasSelection) {
+    const text = getSelectedText();
+    if (!text) {
       showToast('Select text to adjust tone', 'info');
       return;
     }
@@ -860,25 +866,39 @@ export default function WritePage() {
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
 
-      showVariationPicker(text, variations, (chosen) => {
-        if (canvasRef.current) {
-          const canvas = canvasRef.current;
-          canvas.focus();
-          const finalHasSelection = restoreSavedSelection();
-          setIsApplyingHistory(true);
-          applyChosenText(chosen, finalHasSelection, canvas);
-          setIsApplyingHistory(false);
-          captureHistoryState();
-          setIsDirty(true);
-          updateWordCount();
-          updateAutosaveStatus('Tone adjusted!', 'saved');
-          showToast('✅ Tone adjusted!', 'success');
-        }
-        currentSelectionRangeRef.current = null;
-      }, () => {
-        updateAutosaveStatus('Canceled', 'info');
-        currentSelectionRangeRef.current = null;
-      });
+     showVariationPicker(text, variations, (chosen) => {
+  if (canvasRef.current) {
+    const canvas = canvasRef.current;
+    canvas.focus();
+    restoreSavedSelection(); // This helps, but doesn't guarantee sel != null
+
+    setIsApplyingHistory(true);
+
+    // Safe selection handling
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(chosen));
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+
+    setIsApplyingHistory(false);
+    captureHistoryState();
+    setIsDirty(true);
+    updateWordCount();
+    updateAutosaveStatus('Rewritten!', 'saved');
+    showToast('✅ Tone Adjusted!', 'success');
+  }
+  currentSelectionRangeRef.current = null;
+}, () => {
+  updateAutosaveStatus('Canceled', 'info');
+  currentSelectionRangeRef.current = null;
+});
     } catch (err) {
       console.error('Tone failed:', err);
       showToast('Tone adjustment failed – try again', 'error');
@@ -890,13 +910,8 @@ export default function WritePage() {
   };
 
   const handleExpandText = async () => {
-    // NEW: Ensure canvas is focused first on mobile
-    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
-      canvasRef.current.focus({ preventScroll: true });
-    }
-
-    const { text, hasSelection } = getSelectedOrFullText();
-    if (!hasSelection) {
+    const text = getSelectedText();
+    if (!text) {
       showToast('Select text to expand', 'info');
       return;
     }
@@ -923,24 +938,38 @@ export default function WritePage() {
         : [data.editedText || data.generatedPost].filter(Boolean);
 
       showVariationPicker(text, variations, (chosen) => {
-        if (canvasRef.current) {
-          const canvas = canvasRef.current;
-          canvas.focus();
-          const finalHasSelection = restoreSavedSelection();
-          setIsApplyingHistory(true);
-          applyChosenText(chosen, finalHasSelection, canvas);
-          setIsApplyingHistory(false);
-          captureHistoryState();
-          setIsDirty(true);
-          updateWordCount();
-          updateAutosaveStatus('Text expanded!', 'saved');
-          showToast('✅ Text expanded!', 'success');
-        }
-        currentSelectionRangeRef.current = null;
-      }, () => {
-        updateAutosaveStatus('Canceled', 'info');
-        currentSelectionRangeRef.current = null;
-      });
+  if (canvasRef.current) {
+    const canvas = canvasRef.current;
+    canvas.focus();
+    restoreSavedSelection(); // This helps, but doesn't guarantee sel != null
+
+    setIsApplyingHistory(true);
+
+    // Safe selection handling
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(chosen));
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+
+    setIsApplyingHistory(false);
+    captureHistoryState();
+    setIsDirty(true);
+    updateWordCount();
+    updateAutosaveStatus('Rewritten!', 'saved');
+    showToast('✅ Text Expanded!', 'success');
+  }
+  currentSelectionRangeRef.current = null;
+}, () => {
+  updateAutosaveStatus('Canceled', 'info');
+  currentSelectionRangeRef.current = null;
+});
     } catch (err) {
       console.error('Expand failed:', err);
       showToast('Expansion failed – try again', 'error');
@@ -952,13 +981,8 @@ export default function WritePage() {
   };
 
   const handleCondenseText = async () => {
-    // NEW: Ensure canvas is focused first on mobile
-    if (/Android|iPhone|iPad/i.test(navigator.userAgent) && canvasRef.current) {
-      canvasRef.current.focus({ preventScroll: true });
-    }
-
-    const { text, hasSelection } = getSelectedOrFullText();
-    if (!hasSelection) {
+    const text = getSelectedText();
+    if (!text) {
       showToast('Select text to condense', 'info');
       return;
     }
@@ -985,24 +1009,38 @@ export default function WritePage() {
         : [data.editedText || data.generatedPost].filter(Boolean);
 
       showVariationPicker(text, variations, (chosen) => {
-        if (canvasRef.current) {
-          const canvas = canvasRef.current;
-          canvas.focus();
-          const finalHasSelection = restoreSavedSelection();
-          setIsApplyingHistory(true);
-          applyChosenText(chosen, finalHasSelection, canvas);
-          setIsApplyingHistory(false);
-          captureHistoryState();
-          setIsDirty(true);
-          updateWordCount();
-          updateAutosaveStatus('Text condensed!', 'saved');
-          showToast('✅ Text condensed!', 'success');
-        }
-        currentSelectionRangeRef.current = null;
-      }, () => {
-        updateAutosaveStatus('Canceled', 'info');
-        currentSelectionRangeRef.current = null;
-      });
+  if (canvasRef.current) {
+    const canvas = canvasRef.current;
+    canvas.focus();
+    restoreSavedSelection(); // This helps, but doesn't guarantee sel != null
+
+    setIsApplyingHistory(true);
+
+    // Safe selection handling
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(chosen));
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+
+    setIsApplyingHistory(false);
+    captureHistoryState();
+    setIsDirty(true);
+    updateWordCount();
+    updateAutosaveStatus('Rewritten!', 'saved');
+    showToast('✅ Text Condensed!', 'success');
+  }
+  currentSelectionRangeRef.current = null;
+}, () => {
+  updateAutosaveStatus('Canceled', 'info');
+  currentSelectionRangeRef.current = null;
+});
     } catch (err) {
       console.error('Condense failed:', err);
       showToast('Condensation failed – try again', 'error');
@@ -1013,18 +1051,48 @@ export default function WritePage() {
     }
   };
 
+  // --- Blur/close handling ---
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        toolbarRef.current &&
+        !toolbarRef.current.contains(e.target as Node) &&
+        canvasRef.current &&
+        !canvasRef.current.contains(e.target as Node)
+      ) {
+        hideSelectionToolbar();
+      }
+    };
+
+    const handleScroll = () => {
+      if (selectionToolbarVisible) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          showSelectionToolbar(sel.getRangeAt(0));
+        } else {
+          hideSelectionToolbar();
+        }
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll);
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
+      if (variationPickerRef.current) variationPickerRef.current.remove();
+    };
+  }, [selectionToolbarVisible]);
+
   // --- Initial load ---
   useEffect(() => {
     loadAllDrafts();
     resetHistory();
     captureHistoryState();
     updateWordCount();
-
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
-      if (variationPickerRef.current) variationPickerRef.current.remove();
-    };
   }, []);
 
   // --- Render UI ---
@@ -1057,24 +1125,24 @@ export default function WritePage() {
         </div>
         <div className="drafts-list">
           {drafts.length > 0 ? (
-  drafts.map((d) => (
-    <div
-      key={d.id}
-      className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
-      onClick={() => {
-        loadDraft(d.id);
-        if (window.innerWidth <= 768) setSidebarOpen(false);
-      }}
-    >
-      <span className="draft-title">{escapeHtml(d.title)}</span>
-      <span className="draft-time">{d.lastEdited}</span>
-    </div>
-  ))
-) : (
-  <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
-    No drafts yet
-  </div>
-)}
+            drafts.map((d) => (
+              <div
+                key={d.id}
+                className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
+                onClick={() => {
+                  loadDraft(d.id);
+                  if (window.innerWidth <= 768) setSidebarOpen(false);
+                }}
+              >
+                <span className="draft-title">{escapeHtml(d.title)}</span>
+                <span className="draft-time">{d.lastEdited}</span>
+              </div>
+            ))
+          ) : (
+            <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
+              No drafts yet
+            </div>
+          )}
         </div>
       </div>
 
@@ -1091,52 +1159,6 @@ export default function WritePage() {
           <button className="mobile-drafts-toggle" onClick={() => setSidebarOpen(true)}>
             Drafts
           </button>
-          <div className="ai-controls-group">
-            <div className="ai-controls-top">
-              <button 
-                className="btn ai-btn" 
-                onClick={handleGenerateSpark}
-                // NEW: Prevent selection loss on mobile
-                onTouchStart={(e) => e.preventDefault()}
-              >
-                ✨ Spark
-              </button>
-              <button 
-                className="btn ai-btn" 
-                onClick={handleRewriteSelection}
-                // NEW: Prevent selection loss on mobile
-                onTouchStart={(e) => e.preventDefault()}
-              >
-                🧠 Rewrite
-              </button>
-              <button 
-                className="btn ai-btn" 
-                onClick={handleAdjustTone}
-                // NEW: Prevent selection loss on mobile
-                onTouchStart={(e) => e.preventDefault()}
-              >
-                🎭 Tone
-              </button>
-            </div>
-            <div className="ai-controls-bottom">
-              <button 
-                className="btn ai-btn" 
-                onClick={handleExpandText}
-                // NEW: Prevent selection loss on mobile
-                onTouchStart={(e) => e.preventDefault()}
-              >
-                📈 Expand
-              </button>
-              <button 
-                className="btn ai-btn" 
-                onClick={handleCondenseText}
-                // NEW: Prevent selection loss on mobile
-                onTouchStart={(e) => e.preventDefault()}
-              >
-                📉 Condense
-              </button>
-            </div>
-          </div>
           <div className="header-actions">
             <div className="history-controls">
               <button className="btn history-btn" onClick={undo} title="Undo (Ctrl+Z)">
@@ -1183,6 +1205,77 @@ export default function WritePage() {
           <span>{wordCount} words</span>
         </div>
       </div>
+
+      {/* Selection Toolbar (Mobile/Any) */}
+      {selectionToolbarVisible && (
+        <div
+          ref={toolbarRef}
+          style={{
+            position: 'fixed',
+            top: `${toolbarPosition.top}px`,
+            left: `${toolbarPosition.left}px`,
+            display: 'flex',
+            gap: '6px',
+            padding: '4px',
+            background: '#1e1e1e',
+            borderRadius: '24px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+            zIndex: 1001,
+            transform: 'translateX(-50%)',
+          }}
+        >
+          <button
+            className="btn ai-btn-small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRewriteSelection();
+            }}
+            style={{ padding: '6px 8px', fontSize: '0.85em' }}
+          >
+            🧠
+          </button>
+          <button
+            className="btn ai-btn-small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleAdjustTone();
+            }}
+            style={{ padding: '6px 8px', fontSize: '0.85em' }}
+          >
+            🎭
+          </button>
+          <button
+            className="btn ai-btn-small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleExpandText();
+            }}
+            style={{ padding: '6px 8px', fontSize: '0.85em' }}
+          >
+            📈
+          </button>
+          <button
+            className="btn ai-btn-small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCondenseText();
+            }}
+            style={{ padding: '6px 8px', fontSize: '0.85em' }}
+          >
+            📉
+          </button>
+          <button
+            className="btn ai-btn-small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleGenerateSpark();
+            }}
+            style={{ padding: '6px 8px', fontSize: '0.85em' }}
+          >
+            ✨
+          </button>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (

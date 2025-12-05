@@ -1,111 +1,91 @@
-// app/estate/page.tsx
-'use client';
+// app/estate/page.tsx  (or pages/estate.tsx depending on your Next.js version)
+import React, { useState, useRef } from 'react';
+import { Upload } from 'lucide-react';
+import { uploadImage } from '@/lib/uploadImage';
 
-import { useState, useRef } from 'react';
-
-export default function EstateUploadPage() {
-  const [preview, setPreview] = useState<string | null>(null);
-  const [uploadUrl, setUploadUrl] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+const EstatePage = () => {
+  const [isLoggedIn] = useState(true); // 👈 toggle to false to hide upload UI
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setPreview(URL.createObjectURL(file));
-      setUploadUrl(null); // reset previous result
+  const property = {
+    id: '1',
+    title: 'Oceanfront Infinity Estate',
+    image: 'https://placehold.co/800x600/0c0a1d/ffffff?text=Oceanfront+Infinity',
+  };
+
+  const handleUpload = (file: File) => {
+    uploadImage({
+      file,
+      entityType: 'estate', // or 'pageType' — your naming
+      entityId: property.id,
+    })
+      .then(() => alert('✅ Upload successful!'))
+      .catch((err) => alert('❌ ' + err.message));
+  };
+
+  const handleImageClick = () => {
+    if (isLoggedIn) {
+      fileInputRef.current?.click();
     }
   };
 
-  const handleUpload = async () => {
-    const file = fileInputRef.current?.files?.[0];
-    if (!file) {
-      alert('Please select a file first.');
-      return;
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (!isLoggedIn) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      handleUpload(file);
     }
+  };
 
-    const formData = new FormData();
-    formData.append('file', file);
-
-    setIsUploading(true);
-    try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setUploadUrl(data.url);
-      } else {
-        alert('Upload failed: ' + (data.error || 'Unknown error'));
-      }
-    } catch (err) {
-      console.error(err);
-      alert('Upload failed. Check console.');
-    } finally {
-      setIsUploading(false);
-    }
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
-      <h1>🏡 Real Estate Upload Test</h1>
-      <p>Upload a property image to test Supabase Storage.</p>
+    <div className="min-h-screen bg-gray-900 text-white p-8">
+      <h1 className="text-3xl font-bold mb-6">{property.title}</h1>
 
-      <input
-        type="file"
-        accept="image/*"
-        onChange={handleFileChange}
-        ref={fileInputRef}
-        style={{ marginTop: '1rem' }}
-      />
+      {/* Uploadable Image */}
+      <div
+        className="relative w-full max-w-2xl mx-auto group"
+        onClick={handleImageClick}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+      >
+        <img
+          src={property.image}
+          alt={property.title}
+          className="w-full rounded-xl shadow-2xl"
+        />
+        {isLoggedIn && (
+          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="bg-black/60 backdrop-blur-sm rounded-full p-2">
+              <Upload className="w-5 h-5 text-white" />
+            </div>
+          </div>
+        )}
+      </div>
 
-      {preview && (
-        <div style={{ marginTop: '1rem' }}>
-          <h3>Preview:</h3>
-          <img
-            src={preview}
-            alt="Preview"
-            style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }}
-          />
-        </div>
+      {/* Hidden file input */}
+      {isLoggedIn && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUpload(file);
+          }}
+        />
       )}
 
-      <button
-        onClick={handleUpload}
-        disabled={!preview || isUploading}
-        style={{
-          marginTop: '1rem',
-          padding: '0.5rem 1rem',
-          backgroundColor: '#0070f3',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: !preview || isUploading ? 'not-allowed' : 'pointer',
-        }}
-      >
-        {isUploading ? 'Uploading...' : 'Upload to Supabase'}
-      </button>
-
-      {uploadUrl && (
-        <div style={{ marginTop: '1rem' }}>
-          <h3>✅ Upload Success!</h3>
-          <p>
-            <a href={uploadUrl} target="_blank" rel="noopener noreferrer">
-              View uploaded image
-            </a>
-          </p>
-          <input
-            type="text"
-            value={uploadUrl}
-            readOnly
-            onClick={(e) => (e.target as HTMLInputElement).select()}
-            style={{ width: '100%', padding: '0.3rem', marginTop: '0.5rem' }}
-          />
-        </div>
+      {!isLoggedIn && (
+        <p className="text-center mt-4 text-gray-400">Log in to upload images.</p>
       )}
     </div>
   );
-}
+};
+
+export default EstatePage;

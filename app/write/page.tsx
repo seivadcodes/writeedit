@@ -83,7 +83,8 @@ export default function WritePage() {
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
-  const mobileAiBarRef = useRef<HTMLDivElement | null>(null);
+  const mobileToolbarRef = useRef<HTMLDivElement>(null);
+  const mobileToolbarTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
@@ -100,19 +101,9 @@ export default function WritePage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
-  const [showMobileAiBar, setShowMobileAiBar] = useState(false);
-  const [mobileBarPosition, setMobileBarPosition] = useState({ top: 0, left: 0 });
-
-  // --- Check if mobile ---
-  useEffect(() => {
-    const checkMobile = () => {
-      const isMob = window.innerWidth <= 768;
-      setIsMobile(isMob);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
+  const [showMobileToolbar, setShowMobileToolbar] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState({ x: 0, y: 0 });
 
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
@@ -695,6 +686,7 @@ export default function WritePage() {
 
   // --- Handle AI Operations ---
   const handleGenerateSpark = async () => {
+    setShowMobileToolbar(false);
     if (!canvasRef.current || !titleRef.current) return;
     captureHistoryState();
     setIsAiOperation(true);
@@ -746,7 +738,6 @@ export default function WritePage() {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      if (isMobile) setShowMobileAiBar(false);
     }
   };
 
@@ -774,6 +765,7 @@ export default function WritePage() {
   };
 
   const handleRewriteSelection = async () => {
+    setShowMobileToolbar(false);
     const { text, hasSelection } = getSelectedOrFullText();
     if (!text) {
       showToast('No text to rewrite', 'info');
@@ -818,11 +810,9 @@ export default function WritePage() {
           showToast('✅ Rewritten!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Rewrite failed:', err);
@@ -835,6 +825,7 @@ export default function WritePage() {
   };
 
   const handleAdjustTone = async () => {
+    setShowMobileToolbar(false);
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to adjust tone', 'info');
@@ -873,11 +864,9 @@ export default function WritePage() {
           showToast('✅ Tone adjusted!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Tone failed:', err);
@@ -890,6 +879,7 @@ export default function WritePage() {
   };
 
   const handleExpandText = async () => {
+    setShowMobileToolbar(false);
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to expand', 'info');
@@ -932,11 +922,9 @@ export default function WritePage() {
           showToast('✅ Text expanded!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Expand failed:', err);
@@ -949,6 +937,7 @@ export default function WritePage() {
   };
 
   const handleCondenseText = async () => {
+    setShowMobileToolbar(false);
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to condense', 'info');
@@ -991,11 +980,9 @@ export default function WritePage() {
           showToast('✅ Text condensed!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        if (isMobile) setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Condense failed:', err);
@@ -1007,42 +994,51 @@ export default function WritePage() {
     }
   };
 
-  // --- Mobile AI Bar Positioning ---
-  const handleSelectionChange = useCallback(() => {
-    if (!isMobile) return;
+  // --- Mobile Toolbar Handling ---
+  const updateToolbarPosition = () => {
+    if (!selectionRect || !canvasRef.current) return;
+    
+    const viewportWidth = window.innerWidth;
+    const toolbarWidth = 320; // Approximate width of the toolbar
+    let x = selectionRect.left + selectionRect.width / 2;
+    
+    // Keep toolbar within viewport bounds
+    if (x - toolbarWidth / 2 < 10) x = toolbarWidth / 2 + 10;
+    if (x + toolbarWidth / 2 > viewportWidth - 10) x = viewportWidth - toolbarWidth / 2 - 10;
+    
+    const y = selectionRect.top - 70; // Position above selection with gap
+    setToolbarPosition({ x, y });
+  };
+
+  const handleSelectionChange = () => {
+    if (!isMobile || !canvasRef.current) {
+      setShowMobileToolbar(false);
+      return;
+    }
+
     const selection = window.getSelection();
-    if (
-      !selection ||
-      selection.rangeCount === 0 ||
-      !canvasRef.current ||
-      !canvasRef.current.contains(selection.focusNode)
-    ) {
-      setShowMobileAiBar(false);
+    if (!selection || selection.rangeCount === 0 || !selection.toString().trim()) {
+      setShowMobileToolbar(false);
       return;
     }
 
     const range = selection.getRangeAt(0);
-    if (range.collapsed) {
-      setShowMobileAiBar(false);
+    if (!canvasRef.current.contains(range.commonAncestorContainer)) {
+      setShowMobileToolbar(false);
       return;
     }
 
-    const rect = range.getBoundingClientRect();
-    const barWidth = 300; // Approx width of the bar
-    const top = window.scrollY + rect.top - 50; // 50px above selection
-    let left = window.scrollX + rect.left + rect.width / 2 - barWidth / 2;
-    left = Math.max(10, Math.min(left, window.innerWidth - barWidth - 10)); // Keep within viewport
-
-    setMobileBarPosition({ top, left });
-    setShowMobileAiBar(true);
-  }, [isMobile]);
-
-  useEffect(() => {
-    if (isMobile) {
-      document.addEventListener('selectionchange', handleSelectionChange);
-      return () => document.removeEventListener('selectionchange', handleSelectionChange);
+    const rects = range.getClientRects();
+    if (rects.length === 0) {
+      setShowMobileToolbar(false);
+      return;
     }
-  }, [isMobile, handleSelectionChange]);
+
+    // Use the first rect for positioning
+    const rect = rects[0];
+    setSelectionRect(rect);
+    setShowMobileToolbar(true);
+  };
 
   // --- Initial load ---
   useEffect(() => {
@@ -1051,13 +1047,38 @@ export default function WritePage() {
     captureHistoryState();
     updateWordCount();
 
+    // Set initial mobile state
+    const checkMobile = () => setIsMobile(window.innerWidth <= 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+
+    // Selection change handler for mobile toolbar
+    document.addEventListener('selectionchange', handleSelectionChange);
+    
+    // Click handler to hide toolbar when clicking outside
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mobileToolbarRef.current && !mobileToolbarRef.current.contains(e.target as Node)) {
+        setShowMobileToolbar(false);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
       if (variationPickerRef.current) variationPickerRef.current.remove();
-      if (mobileAiBarRef.current) mobileAiBarRef.current.remove();
+      window.removeEventListener('resize', checkMobile);
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('click', handleClickOutside);
     };
   }, []);
+
+  useEffect(() => {
+    if (selectionRect && showMobileToolbar) {
+      updateToolbarPosition();
+    }
+  }, [selectionRect, showMobileToolbar, isMobile]);
 
   // --- Render UI ---
   return (
@@ -1123,6 +1144,7 @@ export default function WritePage() {
           <button className="mobile-drafts-toggle" onClick={() => setSidebarOpen(true)}>
             Drafts
           </button>
+          
           {/* Desktop AI Controls */}
           {!isMobile && (
             <div className="ai-controls-group">
@@ -1147,6 +1169,7 @@ export default function WritePage() {
               </div>
             </div>
           )}
+          
           <div className="header-actions">
             <div className="history-controls">
               <button className="btn history-btn" onClick={undo} title="Undo (Ctrl+Z)">
@@ -1179,6 +1202,47 @@ export default function WritePage() {
             </button>
           </div>
         </div>
+        
+        {/* Mobile AI Toolbar */}
+        {isMobile && showMobileToolbar && selectionRect && (
+          <div
+            ref={mobileToolbarRef}
+            className="mobile-ai-toolbar"
+            style={{
+              position: 'fixed',
+              left: `${toolbarPosition.x}px`,
+              top: `${toolbarPosition.y}px`,
+              transform: 'translateX(-50%)',
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              display: 'flex',
+              padding: '6px',
+              gap: '4px',
+              zIndex: 1001,
+              maxWidth: '90vw',
+              overflowX: 'auto',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            <button className="mobile-toolbar-btn" onClick={handleGenerateSpark}>
+              ✨ Spark
+            </button>
+            <button className="mobile-toolbar-btn" onClick={handleRewriteSelection}>
+              🧠 Rewrite
+            </button>
+            <button className="mobile-toolbar-btn" onClick={handleAdjustTone}>
+              🎭 Tone
+            </button>
+            <button className="mobile-toolbar-btn" onClick={handleExpandText}>
+              📈 Expand
+            </button>
+            <button className="mobile-toolbar-btn" onClick={handleCondenseText}>
+              📉 Condense
+            </button>
+          </div>
+        )}
+
         <div
           ref={canvasRef}
           contentEditable
@@ -1193,118 +1257,6 @@ export default function WritePage() {
           <span>{wordCount} words</span>
         </div>
       </div>
-
-      {/* Mobile AI Bar */}
-      {isMobile && showMobileAiBar && (
-        <div
-          ref={mobileAiBarRef}
-          style={{
-            position: 'fixed',
-            top: `${mobileBarPosition.top}px`,
-            left: `${mobileBarPosition.left}px`,
-            transform: 'translateX(-50%)',
-            background: '#fff',
-            borderRadius: '24px',
-            padding: '8px 12px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            zIndex: 10001,
-            display: 'flex',
-            gap: '12px',
-            whiteSpace: 'nowrap',
-            fontSize: '14px',
-          }}
-        >
-          <button
-            className="mobile-ai-btn"
-            onClick={handleRewriteSelection}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '4px',
-              borderRadius: '8px',
-            }}
-            title="Rewrite"
-          >
-            <span>🧠</span>
-            <span style={{ fontSize: '10px' }}>Rewrite</span>
-          </button>
-          <button
-            className="mobile-ai-btn"
-            onClick={handleAdjustTone}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '4px',
-              borderRadius: '8px',
-            }}
-            title="Tone"
-          >
-            <span>🎭</span>
-            <span style={{ fontSize: '10px' }}>Tone</span>
-          </button>
-          <button
-            className="mobile-ai-btn"
-            onClick={handleExpandText}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '4px',
-              borderRadius: '8px',
-            }}
-            title="Expand"
-          >
-            <span>📈</span>
-            <span style={{ fontSize: '10px' }}>Expand</span>
-          </button>
-          <button
-            className="mobile-ai-btn"
-            onClick={handleCondenseText}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '4px',
-              borderRadius: '8px',
-            }}
-            title="Condense"
-          >
-            <span>📉</span>
-            <span style={{ fontSize: '10px' }}>Condense</span>
-          </button>
-          <button
-            className="mobile-ai-btn"
-            onClick={() => setShowMobileAiBar(false)}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '4px',
-              borderRadius: '8px',
-            }}
-            title="Close"
-          >
-            <span>✕</span>
-          </button>
-        </div>
-      )}
 
       {/* Toast */}
       {toast && (

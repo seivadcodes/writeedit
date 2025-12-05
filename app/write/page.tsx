@@ -986,18 +986,26 @@ export default function WritePage() {
   };
 
   // --- Initial load ---
-  useEffect(() => {
-    loadAllDrafts();
-    resetHistory();
-    captureHistoryState();
-    updateWordCount();
+ useEffect(() => {
+  loadAllDrafts();
+  resetHistory();
+  captureHistoryState();
+  updateWordCount();
 
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
-      if (variationPickerRef.current) variationPickerRef.current.remove();
-    };
-  }, []);
+  // NEW: Capture selection when canvas loses focus (critical for mobile)
+  const handleFocusOut = () => {
+    saveCurrentSelection();
+  };
+  const canvas = canvasRef.current;
+  canvas?.addEventListener('focusout', handleFocusOut);
+
+  return () => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
+    if (variationPickerRef.current) variationPickerRef.current.remove();
+    canvas?.removeEventListener('focusout', handleFocusOut);
+  };
+}, []);
 
   // --- Render UI ---
   return (

@@ -98,8 +98,9 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [showSelectionToolbar, setShowSelectionToolbar] = useState(false);
-  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
+  // Mobile selection toolbar state
+  const [showMobileToolbar, setShowMobileToolbar] = useState(false);
+  const [selectedText, setSelectedText] = useState('');
 
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
@@ -110,6 +111,12 @@ export default function WritePage() {
   const updateAutosaveStatus = (text: string, type: typeof autosaveStatusType) => {
     setAutosaveStatus(text);
     setAutosaveStatusType(type);
+  };
+
+  // --- Close mobile toolbar ---
+  const closeMobileToolbar = () => {
+    setShowMobileToolbar(false);
+    window.getSelection()?.removeAllRanges();
   };
 
   // --- Selection utils ---
@@ -544,6 +551,32 @@ export default function WritePage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
 
+  // --- Mobile selection toolbar ---
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (window.innerWidth > 768) return; // Only on mobile
+      
+      const selection = window.getSelection();
+      const canvas = canvasRef.current;
+      
+      if (!selection || !canvas) return;
+      
+      const text = selection.toString().trim();
+      const isSelectionInCanvas = selection.rangeCount > 0 && 
+        canvas.contains(selection.getRangeAt(0).commonAncestorContainer);
+      
+      if (text && isSelectionInCanvas) {
+        setSelectedText(text);
+        setShowMobileToolbar(true);
+      } else {
+        setShowMobileToolbar(false);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, []);
+
   // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
@@ -628,7 +661,6 @@ export default function WritePage() {
           modal.remove();
           variationPickerRef.current = null;
           onChoose(text);
-          setShowSelectionToolbar(false);
         });
         item.addEventListener('mouseenter', () => item.style.background = '#f0f7ff');
         item.addEventListener('mouseleave', () => item.style.background = '');
@@ -643,7 +675,6 @@ export default function WritePage() {
       modal.remove();
       variationPickerRef.current = null;
       onCancel();
-      setShowSelectionToolbar(false);
     });
 
     modal.appendChild(picker);
@@ -762,15 +793,14 @@ export default function WritePage() {
   };
 
   const handleRewriteSelection = async () => {
+    closeMobileToolbar();
     const { text, hasSelection } = getSelectedOrFullText();
     if (!text) {
       showToast('No text to rewrite', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
     if (hasSelection && text.split(' ').length > 50) {
       showToast('Please select ≤50 words for best results', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
 
@@ -819,15 +849,14 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      setShowSelectionToolbar(false);
     }
   };
 
   const handleAdjustTone = async () => {
+    closeMobileToolbar();
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to adjust tone', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
 
@@ -874,20 +903,18 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      setShowSelectionToolbar(false);
     }
   };
 
   const handleExpandText = async () => {
+    closeMobileToolbar();
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to expand', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
     if (text.split(' ').length > 50) {
       showToast('Select ≤50 words to expand', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
 
@@ -934,20 +961,18 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      setShowSelectionToolbar(false);
     }
   };
 
   const handleCondenseText = async () => {
+    closeMobileToolbar();
     const { text, hasSelection } = getSelectedOrFullText();
     if (!hasSelection) {
       showToast('Select text to condense', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
     if (text.split(' ').length < 15) {
       showToast('Text is too short to condense effectively', 'info');
-      setShowSelectionToolbar(false);
       return;
     }
 
@@ -994,38 +1019,8 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      setShowSelectionToolbar(false);
     }
   };
-
-  // --- Mobile selection toolbar handler ---
-  useEffect(() => {
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (!isTouchDevice) return;
-
-    const handleSelectionChange = () => {
-      if (isAiOperation || isApplyingHistory) return;
-
-      const selection = window.getSelection();
-      const canvas = canvasRef.current;
-      if (!selection || !canvas) return;
-
-      const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-      const hasSelection = range && !range.collapsed && canvas.contains(range.commonAncestorContainer);
-
-      if (hasSelection && range) {
-        const rect = range.getBoundingClientRect();
-        setSelectionRect(rect);
-        setShowSelectionToolbar(true);
-        saveCurrentSelection();
-      } else {
-        setShowSelectionToolbar(false);
-      }
-    };
-
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => document.removeEventListener('selectionchange', handleSelectionChange);
-  }, [isAiOperation, isApplyingHistory]);
 
   // --- Initial load ---
   useEffect(() => {
@@ -1071,24 +1066,24 @@ export default function WritePage() {
         </div>
         <div className="drafts-list">
           {drafts.length > 0 ? (
-            drafts.map((d) => (
-              <div
-                key={d.id}
-                className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
-                onClick={() => {
-                  loadDraft(d.id);
-                  if (window.innerWidth <= 768) setSidebarOpen(false);
-                }}
-              >
-                <span className="draft-title">{escapeHtml(d.title)}</span>
-                <span className="draft-time">{d.lastEdited}</span>
-              </div>
-            ))
-          ) : (
-            <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
-              No drafts yet
-            </div>
-          )}
+  drafts.map((d) => (
+    <div
+      key={d.id}
+      className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
+      onClick={() => {
+        loadDraft(d.id);
+        if (window.innerWidth <= 768) setSidebarOpen(false);
+      }}
+    >
+      <span className="draft-title">{escapeHtml(d.title)}</span>
+      <span className="draft-time">{d.lastEdited}</span>
+    </div>
+  ))
+) : (
+  <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
+    No drafts yet
+  </div>
+)}
         </div>
       </div>
 
@@ -1173,44 +1168,119 @@ export default function WritePage() {
         </div>
       </div>
 
-      {/* Mobile Selection AI Toolbar */}
-      {showSelectionToolbar && selectionRect && (
-        <div
-          style={{
-            position: 'fixed',
-            left: `${selectionRect.left + window.scrollX + selectionRect.width / 2}px`,
-            top: `${selectionRect.top + window.scrollY - 50}px`,
-            transform: 'translateX(-50%)',
-            backgroundColor: 'white',
-            borderRadius: '24px',
-            padding: '6px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            zIndex: 1001,
-            display: 'flex',
-            gap: '8px',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleRewriteSelection}>
-            🧠 Rewrite
-          </button>
-          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleAdjustTone}>
-            🎭 Tone
-          </button>
-          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleExpandText}>
-            📈 Expand
-          </button>
-          <button className="btn ai-btn" style={{ fontSize: '0.9em', padding: '6px 10px' }} onClick={handleCondenseText}>
-            📉 Condense
-          </button>
-          <button
-            className="btn"
-            style={{ fontSize: '1.2em', padding: '4px 8px' }}
-            onClick={() => setShowSelectionToolbar(false)}
-            title="Close"
-          >
-            ✕
-          </button>
+      {/* Mobile Selection Toolbar */}
+      {showMobileToolbar && (
+        <div style={{
+          position: 'fixed',
+          bottom: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'white',
+          borderRadius: '12px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+          zIndex: 10000,
+          maxWidth: '90vw',
+          width: '400px',
+          padding: '12px'
+        }}>
+          <div style={{ position: 'relative', paddingRight: '30px' }}>
+            <div style={{
+              fontFamily: 'var(--font-spectral), serif',
+              fontSize: '1.1em',
+              lineHeight: '1.5',
+              marginBottom: '12px',
+              fontStyle: 'italic',
+              color: '#444',
+              maxHeight: '80px',
+              overflow: 'hidden'
+            }}>
+              "{selectedText.substring(0, 100)}{selectedText.length > 100 ? '...' : ''}"
+            </div>
+            <div style={{ 
+              display: 'flex', 
+              flexWrap: 'wrap', 
+              gap: '8px',
+              marginTop: '8px'
+            }}>
+              <button 
+                style={{ 
+                  flex: 1, 
+                  minWidth: '80px',
+                  padding: '8px',
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  background: '#f8f9fa',
+                  fontSize: '0.9em',
+                  transition: 'all 0.2s'
+                }}
+                onClick={handleRewriteSelection}
+              >
+                🧠 Rewrite
+              </button>
+              <button 
+                style={{ 
+                  flex: 1, 
+                  minWidth: '80px',
+                  padding: '8px',
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  background: '#f8f9fa',
+                  fontSize: '0.9em',
+                  transition: 'all 0.2s'
+                }}
+                onClick={handleAdjustTone}
+              >
+                🎭 Tone
+              </button>
+              <button 
+                style={{ 
+                  flex: 1, 
+                  minWidth: '80px',
+                  padding: '8px',
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  background: '#f8f9fa',
+                  fontSize: '0.9em',
+                  transition: 'all 0.2s'
+                }}
+                onClick={handleExpandText}
+              >
+                📈 Expand
+              </button>
+              <button 
+                style={{ 
+                  flex: 1, 
+                  minWidth: '80px',
+                  padding: '8px',
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  background: '#f8f9fa',
+                  fontSize: '0.9em',
+                  transition: 'all 0.2s'
+                }}
+                onClick={handleCondenseText}
+              >
+                📉 Condense
+              </button>
+            </div>
+            <button 
+              style={{
+                position: 'absolute',
+                top: '8px',
+                right: '8px',
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                background: '#f1f3f5',
+                border: 'none',
+                fontWeight: 'bold',
+                cursor: 'pointer'
+              }}
+              onClick={closeMobileToolbar}
+            >
+              ×
+            </button>
+          </div>
         </div>
       )}
 

@@ -1,26 +1,22 @@
-// app/estate/page.tsx  (or pages/estate.tsx depending on your Next.js version)
-import React, { useState, useRef } from 'react';
+// app/test-upload/page.tsx
+"use client";
+
+import { useState, useRef } from 'react';
 import { Upload } from 'lucide-react';
 import { uploadImage } from '@/lib/uploadImage';
 
-const EstatePage = () => {
-  const [isLoggedIn] = useState(true); // 👈 toggle to false to hide upload UI
+export default function TestUploadPage() {
+  const [isLoggedIn] = useState(true); // toggle to false to hide upload
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const property = {
-    id: '1',
-    title: 'Oceanfront Infinity Estate',
-    image: 'https://placehold.co/800x600/0c0a1d/ffffff?text=Oceanfront+Infinity',
-  };
 
   const handleUpload = (file: File) => {
     uploadImage({
       file,
-      entityType: 'estate', // or 'pageType' — your naming
-      entityId: property.id,
+      entityType: 'test-page',
+      entityId: '1',
     })
-      .then(() => alert('✅ Upload successful!'))
-      .catch((err) => alert('❌ ' + err.message));
+      .then(() => alert('✅ Upload succeeded!'))
+      .catch((err) => alert('❌ Upload failed: ' + err.message));
   };
 
   const handleImageClick = () => {
@@ -33,7 +29,7 @@ const EstatePage = () => {
     e.preventDefault();
     if (!isLoggedIn) return;
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
+    if (file?.type.startsWith('image/')) {
       handleUpload(file);
     }
   };
@@ -43,26 +39,24 @@ const EstatePage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <h1 className="text-3xl font-bold mb-6">{property.title}</h1>
+    <div className="min-h-screen bg-gray-900 text-white p-12">
+      <h1 className="text-3xl font-bold mb-8">🧪 Upload Test Page</h1>
+      <p className="text-gray-400 mb-6">
+        {isLoggedIn ? '✅ Logged in – upload enabled' : '❌ Not logged in – upload hidden'}
+      </p>
 
-      {/* Uploadable Image */}
+      {/* Uploadable image */}
       <div
-        className="relative w-full max-w-2xl mx-auto group"
+        className="relative w-80 h-60 mx-auto bg-gray-800 rounded-xl flex items-center justify-center"
         onClick={handleImageClick}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
-        <img
-          src={property.image}
-          alt={property.title}
-          className="w-full rounded-xl shadow-2xl"
-        />
+        <span className="text-gray-500">Drag or click to upload</span>
+
         {isLoggedIn && (
-          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="bg-black/60 backdrop-blur-sm rounded-full p-2">
-              <Upload className="w-5 h-5 text-white" />
-            </div>
+          <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Upload className="w-6 h-6 text-white" />
           </div>
         )}
       </div>
@@ -81,11 +75,15 @@ const EstatePage = () => {
         />
       )}
 
-      {!isLoggedIn && (
-        <p className="text-center mt-4 text-gray-400">Log in to upload images.</p>
-      )}
+      <div className="mt-8 text-center text-gray-500">
+        This upload will be saved to:
+        <br />
+        • Bucket: <code className="bg-gray-800 px-2 rounded">test-uploads</code>
+        <br />
+        • Table: <code className="bg-gray-800 px-2 rounded">test_uploads</code>
+        <br />
+        • entityType: <code>test-page</code>, entityId: <code>1</code>
+      </div>
     </div>
   );
-};
-
-export default EstatePage;
+}

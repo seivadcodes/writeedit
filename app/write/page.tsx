@@ -83,7 +83,8 @@ export default function WritePage() {
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
-  const mobileAiBarRef = useRef<HTMLDivElement | null>(null);
+  const mobileToolbarRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
 
   // --- State ---
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
@@ -99,8 +100,11 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [showMobileAiBar, setShowMobileAiBar] = useState(false);
-  const [mobileBarPosition, setMobileBarPosition] = useState({ top: 0, left: 0 });
+  
+  // Mobile toolbar state
+  const [isTextSelected, setIsTextSelected] = useState(false);
+  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   // --- Toast ---
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info') => {
@@ -121,23 +125,7 @@ export default function WritePage() {
       const range = selection.getRangeAt(0);
       if (canvasRef.current.contains(range.commonAncestorContainer)) {
         currentSelectionRangeRef.current = range.cloneRange();
-        // Show mobile AI bar only if on mobile and there's a non-empty selection
-        if (window.innerWidth <= 768) {
-          const selectedText = selection.toString().trim();
-          if (selectedText) {
-            const rect = range.getBoundingClientRect();
-            setMobileBarPosition({
-              top: rect.top - 50,
-              left: rect.left + rect.width / 2,
-            });
-            setShowMobileAiBar(true);
-          } else {
-            setShowMobileAiBar(false);
-          }
-        }
       }
-    } else if (window.innerWidth <= 768) {
-      setShowMobileAiBar(false);
     }
   };
 
@@ -743,7 +731,6 @@ export default function WritePage() {
       updateWordCount();
       updateAutosaveStatus('Spark inserted!', 'saved');
       showToast('✨ One-sentence spark added!', 'success');
-      setShowMobileAiBar(false);
     } catch (err) {
       console.error('Spark failed:', err);
       showToast('AI spark failed – try again', 'error');
@@ -751,7 +738,6 @@ export default function WritePage() {
     } finally {
       setIsAiOperation(false);
       currentSelectionRangeRef.current = null;
-      if (window.innerWidth <= 768) setShowMobileAiBar(false);
     }
   };
 
@@ -823,11 +809,9 @@ export default function WritePage() {
           showToast('✅ Rewritten!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Rewrite failed:', err);
@@ -836,7 +820,6 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      if (window.innerWidth <= 768) setShowMobileAiBar(false);
     }
   };
 
@@ -879,11 +862,9 @@ export default function WritePage() {
           showToast('✅ Tone adjusted!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Tone failed:', err);
@@ -892,7 +873,6 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      if (window.innerWidth <= 768) setShowMobileAiBar(false);
     }
   };
 
@@ -939,11 +919,9 @@ export default function WritePage() {
           showToast('✅ Text expanded!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Expand failed:', err);
@@ -952,7 +930,6 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      if (window.innerWidth <= 768) setShowMobileAiBar(false);
     }
   };
 
@@ -999,11 +976,9 @@ export default function WritePage() {
           showToast('✅ Text condensed!', 'success');
         }
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       }, () => {
         updateAutosaveStatus('Canceled', 'info');
         currentSelectionRangeRef.current = null;
-        setShowMobileAiBar(false);
       });
     } catch (err) {
       console.error('Condense failed:', err);
@@ -1012,9 +987,88 @@ export default function WritePage() {
       currentSelectionRangeRef.current = null;
     } finally {
       setIsAiOperation(false);
-      if (window.innerWidth <= 768) setShowMobileAiBar(false);
     }
   };
+
+  // --- Mobile Toolbar Management ---
+  const closeMobileToolbar = useCallback(() => {
+    setIsTextSelected(false);
+    setSelectionRect(null);
+  }, []);
+
+  const updateMobileSelection = useCallback(() => {
+    if (!isMobile || !canvasRef.current) {
+      closeMobileToolbar();
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      closeMobileToolbar();
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!canvasRef.current.contains(range.commonAncestorContainer)) {
+      closeMobileToolbar();
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      closeMobileToolbar();
+      return;
+    }
+
+    // Get header height if available
+    const headerHeight = headerRef.current?.offsetHeight || 60;
+    
+    // Calculate position ensuring it's visible
+    let topPosition = rect.top - 60; // Toolbar height + gap
+    if (topPosition < headerHeight + 10) {
+      topPosition = headerHeight + 10;
+    }
+
+    setSelectionRect({
+      ...rect,
+      top: topPosition,
+      bottom: topPosition + 50, // Approximate toolbar height
+      height: 50
+    });
+    setIsTextSelected(true);
+  }, [isMobile, closeMobileToolbar]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      updateMobileSelection();
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [updateMobileSelection]);
+
+  useEffect(() => {
+    if (isTextSelected && mobileToolbarRef.current) {
+      const handleClickOutside = (e: MouseEvent) => {
+        if (mobileToolbarRef.current && !mobileToolbarRef.current.contains(e.target as Node)) {
+          closeMobileToolbar();
+        }
+      };
+      
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [isTextSelected, closeMobileToolbar]);
 
   // --- Initial load ---
   useEffect(() => {
@@ -1023,34 +1077,7 @@ export default function WritePage() {
     captureHistoryState();
     updateWordCount();
 
-    const handleSelectionChange = () => {
-      if (window.innerWidth > 768) return;
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0 || !canvasRef.current) {
-        setShowMobileAiBar(false);
-        return;
-      }
-      const range = selection.getRangeAt(0);
-      if (!canvasRef.current.contains(range.commonAncestorContainer)) {
-        setShowMobileAiBar(false);
-        return;
-      }
-      const selectedText = selection.toString().trim();
-      if (selectedText) {
-        const rect = range.getBoundingClientRect();
-        setMobileBarPosition({
-          top: rect.top - 50,
-          left: rect.left + rect.width / 2,
-        });
-        setShowMobileAiBar(true);
-      } else {
-        setShowMobileAiBar(false);
-      }
-    };
-
-    document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (pendingHistoryCaptureRef.current) clearTimeout(pendingHistoryCaptureRef.current);
       if (variationPickerRef.current) variationPickerRef.current.remove();
@@ -1060,6 +1087,58 @@ export default function WritePage() {
   // --- Render UI ---
   return (
     <div className="writing-app">
+      <style>{`
+        @media (max-width: 768px) {
+          .ai-controls-group {
+            display: none !important;
+          }
+          
+          .mobile-ai-toolbar {
+            position: fixed;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: auto;
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 8px 12px;
+            z-index: 10000;
+            display: flex;
+            gap: 8px;
+            max-width: 90vw;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+          }
+          
+          .mobile-ai-toolbar::-webkit-scrollbar {
+            display: none;
+          }
+          
+          .mobile-toolbar-btn {
+            background: none;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 16px;
+            font-size: 14px;
+            white-space: nowrap;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+          }
+          
+          .mobile-toolbar-btn:hover {
+            background: #f0f0f0;
+          }
+          
+          .mobile-toolbar-btn i {
+            font-size: 18px;
+          }
+        }
+      `}</style>
+
       {/* Sidebar */}
       <div className={`drafts-sidebar ${sidebarOpen ? 'active' : ''}`}>
         <div className="sidebar-header">
@@ -1096,7 +1175,7 @@ export default function WritePage() {
                   if (window.innerWidth <= 768) setSidebarOpen(false);
                 }}
               >
-                <span className="draft-title">{escapeHtml(d.title)}</span>
+                <span className="draft-title">{d.title}</span>
                 <span className="draft-time">{d.lastEdited}</span>
               </div>
             ))
@@ -1110,7 +1189,7 @@ export default function WritePage() {
 
       {/* Main Writing Area */}
       <div className="writing-main">
-        <div className="writing-header">
+        <div className="writing-header" ref={headerRef}>
           <input
             type="text"
             ref={titleRef}
@@ -1121,8 +1200,7 @@ export default function WritePage() {
           <button className="mobile-drafts-toggle" onClick={() => setSidebarOpen(true)}>
             Drafts
           </button>
-          {/* Desktop AI Controls */}
-          <div className="ai-controls-group" style={{ display: window.innerWidth > 768 ? 'block' : 'none' }}>
+          <div className="ai-controls-group">
             <div className="ai-controls-top">
               <button className="btn ai-btn" onClick={handleGenerateSpark}>
                 ✨ Spark
@@ -1190,94 +1268,61 @@ export default function WritePage() {
         </div>
       </div>
 
-      {/* Mobile AI Bar */}
-      {showMobileAiBar && window.innerWidth <= 768 && (
+      {/* Mobile AI Toolbar - Only shown on mobile when text is selected */}
+      {isMobile && isTextSelected && selectionRect && (
         <div
-          ref={mobileAiBarRef}
+          ref={mobileToolbarRef}
+          className="mobile-ai-toolbar"
           style={{
-            position: 'fixed',
-            top: `${mobileBarPosition.top}px`,
-            left: `${mobileBarPosition.left}px`,
+            top: `${selectionRect.top - 10}px`,
+            left: '50%',
             transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: '8px',
-            padding: '6px 12px',
-            backgroundColor: 'white',
-            borderRadius: '20px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            zIndex: 1001,
-            whiteSpace: 'nowrap',
           }}
         >
-          <button
-            className="btn"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '14px',
-              padding: '4px 8px',
-              cursor: 'pointer',
+          <button 
+            className="mobile-toolbar-btn" 
+            onClick={() => {
+              closeMobileToolbar();
+              handleGenerateSpark();
             }}
-            onClick={handleRewriteSelection}
-            title="Rewrite"
           >
-            🧠
+            <span>✨</span> Spark
           </button>
-          <button
-            className="btn"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '14px',
-              padding: '4px 8px',
-              cursor: 'pointer',
+          <button 
+            className="mobile-toolbar-btn" 
+            onClick={() => {
+              closeMobileToolbar();
+              handleRewriteSelection();
             }}
-            onClick={handleAdjustTone}
-            title="Tone"
           >
-            🎭
+            <span>🧠</span> Rewrite
           </button>
-          <button
-            className="btn"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '14px',
-              padding: '4px 8px',
-              cursor: 'pointer',
+          <button 
+            className="mobile-toolbar-btn" 
+            onClick={() => {
+              closeMobileToolbar();
+              handleAdjustTone();
             }}
-            onClick={handleExpandText}
-            title="Expand"
           >
-            📈
+            <span>🎭</span> Tone
           </button>
-          <button
-            className="btn"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '14px',
-              padding: '4px 8px',
-              cursor: 'pointer',
+          <button 
+            className="mobile-toolbar-btn" 
+            onClick={() => {
+              closeMobileToolbar();
+              handleExpandText();
             }}
-            onClick={handleCondenseText}
-            title="Condense"
           >
-            📉
+            <span>📈</span> Expand
           </button>
-          <button
-            className="btn"
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '14px',
-              padding: '4px 8px',
-              cursor: 'pointer',
+          <button 
+            className="mobile-toolbar-btn" 
+            onClick={() => {
+              closeMobileToolbar();
+              handleCondenseText();
             }}
-            onClick={handleGenerateSpark}
-            title="Spark"
           >
-            ✨
+            <span>📉</span> Condense
           </button>
         </div>
       )}

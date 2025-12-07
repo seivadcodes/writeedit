@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@supabase/supabase-js';
-import { useImageUpload } from '@/hooks/useImageUpload';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -55,6 +54,7 @@ const App = () => {
   const [scrolled, setScrolled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [properties, setProperties] = useState<Property[]>([]);
+  const [userId, setUserId] = useState<string | null>(null); // For auth
 
   const stats = [
     { value: '12,500+', label: 'Properties Listed', icon: <Home className="w-6 h-6" /> },
@@ -63,75 +63,171 @@ const App = () => {
     { value: '$2.1B', label: 'Total Sales Volume', icon: <TrendingUp className="w-6 h-6" /> },
   ];
 
-  // Initialize properties from blog_posts (auto-creates if missing)
- useEffect(() => {
-  const initializeProperties = async () => {
-    setIsLoading(true);
-    
-    try {
-      // First, check if any property-type blog_posts already exist
-      const { data: existing, error: fetchError } = await supabase
-        .from('blog_posts')
-        .select('id, title, content, image_url, user_id, type')
-        .eq('type', 'property');
+  // Fetch user session on mount
+  useEffect(() => {
+    const init = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUserId(session?.user.id || null);
+    };
+    init();
+  }, []);
 
-      if (fetchError) throw fetchError;
+  // Initialize properties from blog_posts
+  useEffect(() => {
+    const initializeProperties = async () => {
+      setIsLoading(true);
+      
+      try {
+        // First, check if any property-type blog_posts already exist
+        const { data: existing, error: fetchError } = await supabase
+          .from('blog_posts')
+          .select('id, title, content, image_url, user_id, type, metadata')
+          .eq('type', 'property');
 
-      if (existing && existing.length > 0) {
-        // ✅ Database already seeded — hydrate from real data
-        const hydrated = existing.map(row => ({
-          id: row.id,
-          title: row.title,
-          location: '', // ⚠️ You’ll need to store location, beds, etc. in DB too!
-          price: '',
-          beds: 0,
-          baths: 0,
-          sqft: 0,
-          featured: false,
-          rating: 0,
-          type: 'Unknown',
-          description: row.content || '',
-          image: row.image_url || '',
+        if (fetchError) throw fetchError;
+
+        if (existing && existing.length > 0) {
+          // Hydrate from real data
+          const hydrated = existing.map(row => {
+            // Parse metadata if stored as JSON string
+            let metadata = {};
+            try {
+              metadata = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata || {};
+            } catch (e) {}
+
+            return {
+              id: row.id,
+              title: row.title,
+              location: metadata.location || '',
+              price: metadata.price || '',
+              beds: metadata.beds || 0,
+              baths: metadata.baths || 0,
+              sqft: metadata.sqft || 0,
+              featured: metadata.featured || false,
+              rating: metadata.rating || 0,
+              type: metadata.type || 'Unknown',
+              description: row.content || '',
+              image: row.image_url || '',
+            };
+          });
+
+          setProperties(hydrated);
+          setIsLoading(false);
+          return;
+        }
+
+        // ❌ No data exists → seed with mock data
+        const mockProperties: Property[] = [
+          {
+            id: '1',
+            title: 'Oceanfront Villa',
+            location: 'Malibu, CA',
+            price: '$8.5M',
+            beds: 5,
+            baths: 6,
+            sqft: 7500,
+            featured: true,
+            rating: 4.9,
+            type: 'Villa',
+            description: 'Stunning ocean views, infinity pool, private beach access, and smart home automation.',
+            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Oceanfront+Villa'
+          },
+          {
+            id: '2',
+            title: 'Mountain Luxury Estate',
+            location: 'Aspen, CO',
+            price: '$12.3M',
+            beds: 6,
+            baths: 7,
+            sqft: 9200,
+            featured: true,
+            rating: 4.8,
+            type: 'Estate',
+            description: 'Private ski-in/ski-out access, heated garage, wine cellar, and panoramic mountain views.',
+            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Mountain+Estate'
+          },
+          {
+            id: '3',
+            title: 'Downtown Penthouse',
+            location: 'New York, NY',
+            price: '$6.8M',
+            beds: 4,
+            baths: 5,
+            sqft: 5800,
+            featured: false,
+            rating: 4.7,
+            type: 'Penthouse',
+            description: 'Floor-to-ceiling windows, rooftop terrace, concierge service, and skyline views.',
+            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Downtown+Penthouse'
+          },
+          {
+            id: '4',
+            title: 'Desert Oasis Mansion',
+            location: 'Scottsdale, AZ',
+            price: '$5.2M',
+            beds: 5,
+            baths: 5,
+            sqft: 6500,
+            featured: false,
+            rating: 4.6,
+            type: 'Mansion',
+            description: 'Infinity pool, outdoor kitchen, meditation garden, and desert sunset views.',
+            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Desert+Oasis'
+          },
+          {
+            id: '5',
+            title: 'Forest Canopy Sanctuary',
+            location: 'Portland, OR',
+            price: '$3.9M',
+            beds: 4,
+            baths: 4,
+            sqft: 5200,
+            featured: false,
+            rating: 4.5,
+            type: 'Sanctuary',
+            description: 'Treehouse-style living, natural wood finishes, wildlife viewing deck, and privacy.',
+            image: 'https://placehold.co/800x600/0f172a/ffffff?text=Forest+Sanctuary'
+          },
+        ];
+
+        // Insert mock data into blog_posts
+        const blogRecords = mockProperties.map(p => ({
+          id: p.id,
+          title: p.title,
+          content: p.description,
+          image_url: p.image,
+          published: true,
+          user_id: 'system',
+          type: 'property',
+          metadata: JSON.stringify({
+            location: p.location,
+            price: p.price,
+            beds: p.beds,
+            baths: p.baths,
+            sqft: p.sqft,
+            featured: p.featured,
+            rating: p.rating,
+            type: p.type,
+          }),
         }));
 
-        // ❗ But wait: your mock data includes beds, price, etc. — currently NOT in DB!
-        setProperties(hydrated);
+        const { error: upsertError } = await supabase
+          .from('blog_posts')
+          .upsert(blogRecords, { onConflict: 'id' });
+
+        if (upsertError) throw upsertError;
+
+        setProperties(mockProperties);
+      } catch (err: any) {
+        console.error('Failed to initialize properties:', err);
+        alert('Failed to load properties. Check console.');
+      } finally {
         setIsLoading(false);
-        return;
       }
+    };
 
-      // ❌ No data exists → seed with mock data
-      const mockProperties: Property[] = [ /* your list */ ];
-
-      const blogRecords = mockProperties.map(p => ({
-        id: p.id,
-        title: p.title,
-        content: p.description,
-        image_url: p.image,
-        published: true,
-        user_id: 'system',
-        type: 'property',
-        // ❗ Add missing fields to DB if you want full persistence!
-      }));
-
-      const { error: upsertError } = await supabase
-        .from('blog_posts')
-        .upsert(blogRecords, { onConflict: 'id' });
-
-      if (upsertError) throw upsertError;
-
-      // Use mock data as fallback
-      setProperties(mockProperties);
-    } catch (err: any) {
-      console.error('Failed to initialize properties:', err);
-      alert('Failed to load properties. Check console.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  initializeProperties();
-}, []);
+    initializeProperties();
+  }, []);
 
   const filteredProperties = properties.filter(
     (property) =>
@@ -645,6 +741,7 @@ const App = () => {
                   propertyId={selectedProperty.id}
                   currentImage={selectedProperty.image}
                   onReplace={handleReplaceImage}
+                  userId={userId} // Pass userId for upload context
                 />
               </div>
               
@@ -703,20 +800,11 @@ const App = () => {
 };
 
 // ✨ Reusable Upload Trigger Component (inside modal only)
-const ReplaceImageButton = ({ 
-  propertyId, 
-  currentImage, 
-  onReplace 
-}: { 
-  propertyId: string; 
-  currentImage: string; 
-  onReplace: (id: string, url: string) => void; 
-}) => {
+const ReplaceImageButton = ({ propertyId, currentImage, onReplace, userId }: { propertyId: string; currentImage: string; onReplace: (id: string, url: string) => void; userId: string | null }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Use the same supabase client from the top of the file
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // prevent closing modal
     fileInputRef.current?.click();
@@ -724,43 +812,42 @@ const ReplaceImageButton = ({
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !userId) return;
 
     setIsUploading(true);
     setError(null);
 
     try {
-      // Generate unique file path like in TestImagePage
-      const filePath = `blog/${propertyId}/${Date.now()}_${file.name}`;
+      const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '-')}`;
+      const filePath = `blog/${userId}/${fileName}`;
 
-      // ✅ Upload to the SAME bucket: 'blog-images'
+      // Upload to Supabase storage
       const { error: uploadErr } = await supabase.storage
         .from('blog-images')
         .upload(filePath, file, { upsert: false });
 
       if (uploadErr) throw uploadErr;
 
-      // ✅ Get public URL the same way
+      // Get public URL
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // ✅ Save to the SAME table: 'blog_posts'
+      // Save to Supabase
       const { error: updateErr } = await supabase
         .from('blog_posts')
         .update({ image_url: imageUrl })
-        .eq('id', propertyId);
+        .eq('id', propertyId)
+        .eq('type', 'property');
 
       if (updateErr) throw updateErr;
 
-      // ✅ Notify parent to update UI
+      // Notify parent
       onReplace(propertyId, imageUrl);
+
     } catch (err: any) {
-      console.error('Image upload or DB update failed:', err);
-      setError(`Upload failed: ${err.message || 'Unknown error'}`);
+      setError(`Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
-      // Reset input so same file can be re-uploaded
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 

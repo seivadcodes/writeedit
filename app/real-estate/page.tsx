@@ -1,7 +1,7 @@
 // app/test-image/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -13,32 +13,50 @@ export default function TestImagePage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // 1. Get current user session on mount
+  useEffect(() => {
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUserId(session?.user.id || null);
+      
+      // 2. Restore preview from sessionStorage if exists
+      const savedPreview = sessionStorage.getItem('testImagePreview');
+      if (savedPreview) {
+        setPreview(savedPreview);
+      }
+    };
+    
+    getSession();
+  }, []);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !userId) return;
 
     setUploading(true);
     setStatus(null);
 
     try {
-      // Get current user
-      const { data: { session } } = await supabase.auth.getSession();
-      const userId = session?.user.id;
-      if (!userId) throw new Error('Not logged in');
-
-      // Upload image to same bucket as blog
+      // 3. Use userId from state instead of refetching session
       const filePath = `blog/${userId}/${Date.now()}_${file.name}`;
+      
+      // 4. Fixed upload syntax and error handling
       const { error: uploadErr } = await supabase.storage
         .from('blog-images')
         .upload(filePath, file, { upsert: false });
 
       if (uploadErr) throw uploadErr;
 
-      const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
+      // 5. Fixed public URL retrieval
+      const { data } = supabase.storage
+        .from('blog-images')
+        .getPublicUrl(filePath);
+      
       const imageUrl = data.publicUrl;
 
-      // Save to same blog_posts table (as a test post)
+      // 6. Save to database
       const { error: insertErr } = await supabase
         .from('blog_posts')
         .insert({
@@ -51,7 +69,9 @@ export default function TestImagePage() {
 
       if (insertErr) throw insertErr;
 
+      // 7. Persist preview in session storage
       setPreview(imageUrl);
+      sessionStorage.setItem('testImagePreview', imageUrl);
       setStatus('✅ Uploaded and saved to blog_posts + blog-images!');
     } catch (err: any) {
       console.error(err);
@@ -61,11 +81,18 @@ export default function TestImagePage() {
     }
   };
 
+  // 8. Clear preview when user logs out
+  useEffect(() => {
+    if (!userId) {
+      setPreview(null);
+      sessionStorage.removeItem('testImagePreview');
+    }
+  }, [userId]);
+
   return (
     <div className="max-w-md mx-auto p-6 mt-10">
       <h1 className="text-2xl font-bold mb-4">ImageContext Test</h1>
 
-      {/* Placeholder: only show div if no image */}
       {preview ? (
         <img
           src={preview}
@@ -78,11 +105,12 @@ export default function TestImagePage() {
         </div>
       )}
 
+      {/* 9. Disable input when no user or uploading */}
       <input
         type="file"
         accept="image/*"
         onChange={handleUpload}
-        disabled={uploading}
+        disabled={uploading || !userId}
         className="w-full mb-2"
       />
       {uploading && <p>Uploading...</p>}

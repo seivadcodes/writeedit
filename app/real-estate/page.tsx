@@ -1,4 +1,4 @@
-// app/properties/page.tsx
+// app/properties/upload/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -9,114 +9,195 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type Property = {
-  id: string;
-  title: string;
-  content: string;
-  image_url: string;
-  created_at: string;
+// Represents one property slot
+type PropertySlot = {
+  id: number;
+  file: File | null;
+  previewUrl: string | null;
+  uploading: boolean;
+  uploadStatus: 'idle' | 'uploading' | 'success' | 'error';
 };
 
-export default function PropertyGallery() {
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+export default function PropertyUploadPage() {
+  const [userId, setUserId] = useState<string | null>(null);
+  const [slots, setSlots] = useState<PropertySlot[]>(
+    Array.from({ length: 4 }, (_, i) => ({
+      id: i + 1,
+      file: null,
+      previewUrl: null,
+      uploading: false,
+      uploadStatus: 'idle',
+    }))
+  );
 
+  // Fetch user on mount
   useEffect(() => {
-    const init = async () => {
-      // Get user
+    const getUser = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser({
-          id: session.user.id,
-          email: session.user.email || '',
-        });
-      }
-
-      // Fetch all property-like blog posts (treat 'Test Image Upload' or any titled post as property)
-      // You can later filter by a `type = 'property'` column
-      const { data, error } = await supabase
-        .from('blog_posts')
-        .select('id, title, content, image_url, created_at')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching properties:', error);
-      } else {
-        setProperties(data || []);
-      }
-      setLoading(false);
+      setUserId(session?.user.id || null);
     };
-
-    init();
+    getUser();
   }, []);
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Hero Section */}
-      <div className="relative h-[60vh] bg-gradient-to-r from-gray-900 to-black">
-        {properties[0]?.image_url ? (
-          <div className="absolute inset-0 bg-cover bg-center opacity-30" style={{ backgroundImage: `url(${properties[0].image_url})` }} />
-        ) : (
-          <div className="absolute inset-0 bg-gray-800 opacity-40" />
-        )}
-        <div className="relative z-10 flex flex-col items-center justify-center h-full text-center px-4">
-          <h1 className="text-4xl md:text-6xl font-bold text-white drop-shadow-lg">
-            Discover Your Dream Home
-          </h1>
-          <p className="mt-4 text-xl text-white max-w-2xl">
-            Explore luxury properties, modern apartments, and serene countryside estates — all in one place.
-          </p>
-          <button className="mt-6 px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-full transition-all shadow-lg hover:shadow-xl">
-            Browse Listings
-          </button>
-        </div>
+  const handleFileChange = (slotId: number, file: File | null) => {
+    setSlots((prev) =>
+      prev.map((slot) => {
+        if (slot.id === slotId) {
+          if (!file) {
+            return { ...slot, file: null, previewUrl: null };
+          }
+
+          // Generate local preview
+          const previewUrl = URL.createObjectURL(file);
+          return { ...slot, file, previewUrl, uploadStatus: 'idle' };
+        }
+        return slot;
+      })
+    );
+  };
+
+  const handleUpload = async (slotId: number) => {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot?.file || !userId) return;
+
+    setSlots((prev) =>
+      prev.map((s) =>
+        s.id === slotId ? { ...s, uploading: true, uploadStatus: 'uploading' } : s
+      )
+    );
+
+    try {
+      const filePath = `property-images/${userId}/${Date.now()}_${slot.file.name}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('blog-images') // or rename bucket to 'property-images'
+        .upload(filePath, slot.file, { upsert: false });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      // 👉 Optional: Save to a `properties` table later
+      // For now, just keep the URL in state or show success
+
+      setSlots((prev) =>
+        prev.map((s) =>
+          s.id === slotId
+            ? {
+                ...s,
+                uploading: false,
+                uploadStatus: 'success',
+                previewUrl: publicUrl, // show uploaded image
+              }
+            : s
+        )
+      );
+
+      // Revoke local preview to avoid memory leaks
+      if (slot.previewUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(slot.previewUrl);
+      }
+    } catch (err: any) {
+      console.error('Upload failed:', err);
+      setSlots((prev) =>
+        prev.map((s) =>
+          s.id === slotId
+            ? { ...s, uploading: false, uploadStatus: 'error' }
+            : s
+        )
+      );
+    }
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>, slotId: number) => {
+    const file = e.target.files?.[0] || null;
+    if (file && file.type.startsWith('image/')) {
+      handleFileChange(slotId, file);
+    }
+    e.target.value = ''; // reset input
+  };
+
+  if (!userId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-red-600 text-lg">You must be logged in to upload property images.</p>
       </div>
+    );
+  }
 
-      {/* Property Gallery */}
-      <div className="container mx-auto px-4 py-12">
-        <h2 className="text-3xl font-bold text-gray-800 text-center mb-10">Featured Properties</h2>
+  return (
+    <div className="min-h-screen bg-gray-50 py-12 px-4">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-900 text-center mb-2">Add New Properties</h1>
+        <p className="text-gray-600 text-center mb-10">
+          Upload images for up to 4 properties. Click any slot to begin.
+        </p>
 
-        {loading ? (
-          <div className="text-center text-gray-600">Loading properties...</div>
-        ) : properties.length === 0 ? (
-          <div className="text-center text-gray-600">
-            No properties listed yet. <br />
-            <span className="text-sm">{user ? "Upload images via the test page to create listings." : "Log in to add your first property."}</span>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-            {properties.map((property) => (
-              <div
-                key={property.id}
-                className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300"
-              >
-                {property.image_url ? (
-                  <div
-                    className="h-56 bg-cover bg-center w-full"
-                    style={{ backgroundImage: `url(${property.image_url})` }}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          {slots.map((slot) => (
+            <div
+              key={slot.id}
+              className="bg-white rounded-xl shadow-sm border-2 border-dashed border-gray-300 hover:border-emerald-400 transition-colors overflow-hidden relative"
+            >
+              {/* Property preview or placeholder */}
+              {slot.previewUrl ? (
+                <div className="relative">
+                  <img
+                    src={slot.previewUrl}
+                    alt={`Property ${slot.id}`}
+                    className="w-full h-48 object-cover"
                   />
-                ) : (
-                  <div className="h-56 bg-gray-200 flex items-center justify-center">
-                    <span className="text-gray-500">No image</span>
-                  </div>
-                )}
-                <div className="p-5">
-                  <h3 className="text-xl font-bold text-gray-900">{property.title}</h3>
-                  <p className="mt-2 text-gray-600 line-clamp-2">{property.content}</p>
-                  <div className="mt-4 flex justify-between items-center">
-                    <span className="text-sm text-gray-500">
-                      {new Date(property.created_at).toLocaleDateString()}
-                    </span>
-                    <button className="text-emerald-600 hover:text-emerald-800 font-medium">
-                      View Details →
-                    </button>
-                  </div>
+                  {slot.uploadStatus === 'success' && (
+                    <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+                      ✓ Saved
+                    </div>
+                  )}
                 </div>
+              ) : (
+                <div className="w-full h-48 bg-gray-100 flex items-center justify-center">
+                  <span className="text-gray-400 text-sm">Click to add image</span>
+                </div>
+              )}
+
+              {/* Upload controls */}
+              <div className="p-4">
+                <label className="block w-full cursor-pointer">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleFileInput(e, slot.id)}
+                    className="hidden"
+                  />
+                  <span className="text-emerald-600 font-medium hover:underline">
+                    {slot.file ? 'Change Image' : 'Select Image'}
+                  </span>
+                </label>
+
+                {slot.file && slot.uploadStatus !== 'success' && (
+                  <button
+                    onClick={() => handleUpload(slot.id)}
+                    disabled={slot.uploading}
+                    className={`mt-2 w-full py-1.5 text-sm font-medium rounded ${
+                      slot.uploading
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    }`}
+                  >
+                    {slot.uploading ? 'Uploading...' : 'Upload to Cloud'}
+                  </button>
+                )}
+
+                {slot.uploadStatus === 'error' && (
+                  <p className="mt-2 text-red-600 text-xs">Upload failed. Try again.</p>
+                )}
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-8 text-center text-gray-500 text-sm">
+          Images are stored in <code>blog-images</code> bucket under your user ID.
+        </div>
       </div>
     </div>
   );

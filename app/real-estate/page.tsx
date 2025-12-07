@@ -9,51 +9,26 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function RealEstatePage() {
+export default function RealEstateShowcase() {
   const [properties, setProperties] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   // Fetch user and properties on mount
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      const uid = session?.user.id;
-      setUserId(uid || null);
-      setIsAdmin(uid ? true : false); // In real app: check role via claims
+      setUserId(session?.user.id || null);
 
-      if (uid) {
-        // Fetch all property listings (blog posts with real-estate-like titles)
-        const { data, error } = await supabase
-          .from('blog_posts')
-          .select('*')
-          .order('created_at', { ascending: false });
+      // Fetch all blog posts (your "properties")
+      const { data, error } = await supabase
+        .from('blog_posts')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-        if (!error) {
-          // Filter only "property-like" entries (you can add a tag later)
-          const estates = (data || []).filter(post =>
-            post.title.toLowerCase().includes('estate') ||
-            post.title.toLowerCase().includes('villa') ||
-            post.title.toLowerCase().includes('luxury') ||
-            post.title.toLowerCase().includes('property')
-          );
-          setProperties(estates);
-        }
-      } else {
-        // Fetch public listings only
-        const { data, error } = await supabase
-          .from('blog_posts')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!error) {
-          setProperties(data || []);
-        }
+      if (!error) {
+        setProperties(data || []);
       }
-
-      setLoading(false);
     };
 
     init();
@@ -65,25 +40,51 @@ export default function RealEstatePage() {
 
     setUploading(true);
     try {
+      // Generate unique filename
       const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '-')}`;
       const filePath = `blog/${userId}/${fileName}`;
-      
+
+      // Upload to Supabase storage
       const { error: uploadErr } = await supabase.storage
         .from('blog-images')
         .upload(filePath, file, { upsert: false });
 
       if (uploadErr) throw uploadErr;
 
+      // Get public URL
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // Insert new property listing
+      // Auto-generate title & description based on image name or random luxury phrases
+      const titles = [
+        'Oceanfront Villa',
+        'Mountain Luxury Estate',
+        'Downtown Penthouse',
+        'Private Island Retreat',
+        'Desert Oasis Mansion',
+        'Forest Canopy Sanctuary',
+        'Urban Skyline Loft',
+        'Coastal Cliffside Home'
+      ];
+
+      const descriptions = [
+        'Breathtaking views, infinity pool, smart home, private chef kitchen, and 24/7 concierge. Your dream estate awaits.',
+        'Wake up to sunrise over the ocean. This villa is pure serenity with modern elegance.',
+        'Live above the city lights. Floor-to-ceiling windows, rooftop terrace, and panoramic skyline views.',
+        'Escape to nature without sacrificing luxury. Heated floors, outdoor spa, and wildlife sanctuary access.',
+        'Designed for entertainers. Open-concept living, wine cellar, cinema room, and guest suites.'
+      ];
+
+      const title = titles[Math.floor(Math.random() * titles.length)];
+      const description = descriptions[Math.floor(Math.random() * descriptions.length)];
+
+      // Insert into blog_posts (your "property listings")
       const { error: insertErr } = await supabase
         .from('blog_posts')
         .insert({
           user_id: userId,
-          title: `Luxury Villa ${Math.floor(100 + Math.random() * 900)}`,
-          content: 'Breathtaking ocean views, infinity pool, smart home, private chef kitchen, and 24/7 concierge. Your dream estate awaits.',
+          title: title,
+          content: description,
           image_url: imageUrl,
           published: true,
         });
@@ -96,6 +97,7 @@ export default function RealEstatePage() {
         .select('*')
         .order('created_at', { ascending: false });
       setProperties(freshData || []);
+
     } catch (err: any) {
       alert(`❌ Upload failed: ${err.message}`);
     } finally {
@@ -104,64 +106,73 @@ export default function RealEstatePage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-emerald-900 flex items-center justify-center">
-        <div className="text-white text-xl">Discovering Estates...</div>
-      </div>
-    );
-  }
+  // Custom header (hidden by default in layout, but we add our own here)
+  const Header = () => (
+    <div className="bg-gradient-to-r from-slate-900 to-emerald-900 text-white p-4 flex justify-between items-center">
+      <h1 className="text-2xl font-bold">Luxury Estates</h1>
+      <button 
+        onClick={() => window.location.reload()} 
+        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-full text-sm"
+      >
+        Refresh
+      </button>
+    </div>
+  );
+
+  // Custom footer
+  const Footer = () => (
+    <div className="bg-slate-900 text-white p-4 text-center text-sm">
+      © {new Date().getFullYear()} Luxury Estates. All rights reserved.
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-emerald-50">
-      {/* Hero Banner */}
-      <div className="relative w-full h-[60vh] md:h-[70vh] overflow-hidden">
-        {properties[0]?.image_url ? (
-          <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${properties[0].image_url})` }}>
-            <div className="absolute inset-0 bg-black/40"></div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-emerald-50 pb-16">
+      {/* Custom Header */}
+      <Header />
+
+      {/* Hero Section */}
+      {properties.length > 0 && (
+        <div className="relative w-full h-[60vh] md:h-[70vh] overflow-hidden">
+          <div 
+            className="absolute inset-0 bg-cover bg-center" 
+            style={{ backgroundImage: `url(${properties[0].image_url})` }}
+          >
+            <div className="absolute inset-0 bg-black/50"></div>
             <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
               <h1 className="text-3xl md:text-5xl font-bold drop-shadow-lg">{properties[0].title}</h1>
               <p className="mt-2 text-lg drop-shadow">{properties[0].content.substring(0, 100)}...</p>
               <button className="mt-4 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full transition shadow-lg">
-                Explore This Estate
+                View Details →
               </button>
             </div>
           </div>
-        ) : (
-          <div className="absolute inset-0 bg-gradient-to-r from-emerald-700 to-teal-800 flex items-center justify-center">
-            <div className="text-center text-white">
-              <h1 className="text-4xl font-bold">Luxury Estates Await</h1>
-              <p className="mt-2 text-xl">Where dreams find their address.</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Admin Upload (Floating Button) */}
-      {isAdmin && (
-        <div className="fixed bottom-6 right-6 z-50">
-          <label className="block bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-full shadow-xl cursor-pointer transition transform hover:scale-105">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleUpload}
-              disabled={uploading}
-              className="hidden"
-            />
-          </label>
         </div>
       )}
 
+      {/* Upload Button (Floating) */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <label className="block bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-full shadow-xl cursor-pointer transition transform hover:scale-105">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          </svg>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleUpload}
+            disabled={uploading}
+            className="hidden"
+          />
+        </label>
+      </div>
+
       {/* Property Grid */}
       <div className="container mx-auto px-4 py-12">
-        <h2 className="text-3xl font-bold text-center mb-12 text-slate-800">Featured Estates</h2>
+        <h2 className="text-3xl font-bold text-center mb-12 text-slate-800">Featured Properties</h2>
         
         {properties.length === 0 ? (
           <div className="text-center py-12 text-slate-500">
-            No properties listed yet. {isAdmin && 'Add your first luxury estate!'}
+            No properties yet. Upload your first image to create one!
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -189,6 +200,9 @@ export default function RealEstatePage() {
           </div>
         )}
       </div>
+
+      {/* Custom Footer */}
+      <Footer />
 
       {/* Global Styles */}
       <style jsx global>{`

@@ -128,15 +128,27 @@ const App = () => {
       try {
         const { data: existing, error: fetchError } = await supabase
           .from('blog_posts')
-          .select('id, title, content, image_url, user_id, type, metadata')
+          .select('id, title, content, image_url, user_id, type')
           .eq('type', 'property');
 
         if (fetchError) throw fetchError;
 
         if (existing && existing.length > 0) {
-          // Hydrate from real DB — assume metadata holds beds, price, etc.
+          // Hydrate from real DB — parse content for extra fields
           const hydrated = existing.map(row => {
-            const meta = row.metadata || {};
+            let meta = {};
+            try {
+              // Try to parse content as JSON if it starts with { or [
+              if (row.content?.startsWith('{') || row.content?.startsWith('[')) {
+                meta = JSON.parse(row.content);
+              } else {
+                // Fallback: treat content as plain description
+                meta = { description: row.content };
+              }
+            } catch (e) {
+              meta = { description: row.content };
+            }
+
             return {
               id: row.id,
               title: row.title,
@@ -148,7 +160,7 @@ const App = () => {
               featured: meta.featured || false,
               rating: meta.rating || 0,
               type: meta.type || 'Property',
-              description: row.content || '',
+              description: meta.description || '',
               image: row.image_url || '',
             };
           });
@@ -158,12 +170,8 @@ const App = () => {
           const blogRecords = MOCK_PROPERTIES.map(p => ({
             id: p.id,
             title: p.title,
-            content: p.description,
-            image_url: p.image, // empty string
-            published: true,
-            user_id: 'system',
-            type: 'property',
-            metadata: {
+            content: JSON.stringify({
+              description: p.description,
               location: p.location,
               price: p.price,
               beds: p.beds,
@@ -172,7 +180,11 @@ const App = () => {
               featured: p.featured,
               rating: p.rating,
               type: p.type,
-            },
+            }),
+            image_url: p.image, // empty string
+            published: true,
+            user_id: 'system',
+            type: 'property',
           }));
 
           const { error: upsertError } = await supabase

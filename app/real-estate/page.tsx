@@ -361,19 +361,18 @@ export default function RealEstatePage() {
           </div>
         )}
 
-        {/* Tiny Admin Toggle (only if logged in) */}
+        {/* Tiny Admin Toggle (only if logged in) — NOW A CIRCLE */}
         {userId && (
           <div className="absolute top-6 left-6 z-20">
             <button
               onClick={() => setAdminMode(!adminMode)}
-              className={`text-xs px-2 py-1 rounded-full font-mono ${
-                adminMode
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-500 text-white'
+              className={`w-6 h-6 rounded-full border border-gray-400 flex items-center justify-center transition-colors ${
+                adminMode ? 'bg-green-500' : 'bg-gray-400'
               }`}
               title={adminMode ? 'Disable admin mode' : 'Enable admin mode'}
             >
-              {adminMode ? 'ADMIN ON' : 'ADMIN OFF'}
+              {/* Optional: inner dot for visual feedback */}
+              <div className="w-3 h-3 rounded-full bg-white opacity-80"></div>
             </button>
           </div>
         )}
@@ -575,7 +574,7 @@ export default function RealEstatePage() {
               <address className="text-gray-400 not-italic text-sm space-y-2">
                 <p>123 Prestige Avenue</p>
                 <p>Beverly Hills, CA 90210</p>
-                <p className="mt-2">info@luxestate.example</p>
+                <p className="mt-2">info@luxestate.com</p>
                 <p>+1 (555) 123-4567</p>
               </address>
             </div>
@@ -595,10 +594,6 @@ export default function RealEstatePage() {
           {status}
         </div>
       )}
-
-      <p className="text-xs text-gray-500 text-center mt-8 pb-6">
-        All data stored in <code>blog_posts</code> (image_url + JSON in content) and <code>blog-images</code> bucket.
-      </p>
     </div>
   );
 }

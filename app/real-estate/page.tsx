@@ -20,22 +20,23 @@ const LISTINGS = [
 
 type ListingData = {
   image_url: string | null;
-  price?: number;
-  sqft?: number;
-  beds?: number;
-  baths?: number;
-  location?: string;
-  type?: string;
+  price: number;
+  sqft: number;
+  beds: number;
+  baths: number;
+  location: string;
+  type: string;
 };
 
 export default function RealEstatePage() {
   const [listings, setListings] = useState<{ [key: string]: ListingData }>({});
   const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [heroUploading, setHeroUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Initialize: fetch user + existing listing data + hero
+  // Initialize: fetch user + existing listing data + hero image
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -43,21 +44,19 @@ export default function RealEstatePage() {
       setUserId(uid || null);
 
       if (uid) {
-        const titlesToFetch = [...LISTINGS.map(l => l.title), 'Hero Background'];
-        const { data, error } = await supabase
+        // Fetch listings data
+        const { data: listingsData, error: listingsError } = await supabase
           .from('blog_posts')
           .select('title, image_url, content')
           .eq('user_id', uid)
-          .in('title', titlesToFetch);
+          .in('title', LISTINGS.map(l => l.title));
 
-        if (error) {
-          console.error('Failed to fetch listings and hero:', error);
+        if (listingsError) {
+          console.error('Failed to fetch listings:', listingsError);
         } else {
           const initialState: { [key: string]: ListingData } = {};
-
-          // Process property listings
           LISTINGS.forEach((l) => {
-            const stored = data.find((row: any) => row.title === l.title);
+            const stored = listingsData.find((row: any) => row.title === l.title);
             if (stored) {
               let price = l.price;
               let sqft = l.sqft;
@@ -97,12 +96,23 @@ export default function RealEstatePage() {
               };
             }
           });
-
-          // Process hero
-          const heroRow = data.find((row: any) => row.title === 'Hero Background');
-          setHeroImageUrl(heroRow?.image_url || null);
-
           setListings(initialState);
+        }
+
+        // Fetch hero image
+        const { data: heroData, error: heroError } = await supabase
+          .from('blog_posts')
+          .select('image_url')
+          .eq('user_id', uid)
+          .eq('title', 'hero_image')
+          .single();
+
+        if (!heroError || heroError.code === 'PGRST116') { // PGRST116 = no rows found
+          if (heroData) {
+            setHeroImageUrl(heroData.image_url);
+          }
+        } else {
+          console.error('Failed to fetch hero image:', heroError);
         }
       }
     };
@@ -131,6 +141,7 @@ export default function RealEstatePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
+      // Save structured content as JSON
       const content = JSON.stringify({
         price: listings[listingId]?.price || listing.price,
         sqft: listings[listingId]?.sqft || listing.sqft,
@@ -138,9 +149,10 @@ export default function RealEstatePage() {
         baths: listings[listingId]?.baths || listing.baths,
         location: listings[listingId]?.location || listing.location,
         type: listings[listingId]?.type || listing.type,
-        description: `Beautiful ${listing.title} property.`,
+        description: `Beautiful ${listing.title} property.`
       });
 
+      // Upsert: delete old + insert new
       await supabase
         .from('blog_posts')
         .delete()
@@ -181,7 +193,7 @@ export default function RealEstatePage() {
     const file = e.target.files?.[0];
     if (!file || !userId) return;
 
-    setUploading('hero');
+    setHeroUploading(true);
     setStatus(null);
 
     try {
@@ -195,19 +207,23 @@ export default function RealEstatePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // Upsert hero record
+      // Delete existing hero record
       await supabase
         .from('blog_posts')
         .delete()
         .eq('user_id', userId)
-        .eq('title', 'Hero Background');
+        .eq('title', 'hero_image');
 
+      // Insert new hero record
       const { error: insertErr } = await supabase
         .from('blog_posts')
         .insert({
           user_id: userId,
-          title: 'Hero Background',
-          content: '{}',
+          title: 'hero_image',
+          content: JSON.stringify({ 
+            tagline: 'Discover Your Dream Home', 
+            description: 'Luxury properties in the world\'s most exclusive locations' 
+          }),
           image_url: imageUrl,
           published: false,
         });
@@ -215,16 +231,17 @@ export default function RealEstatePage() {
       if (insertErr) throw insertErr;
 
       setHeroImageUrl(imageUrl);
-      setStatus('✅ Hero background updated!');
+      setStatus('✅ Hero image updated!');
       e.target.value = '';
     } catch (err: any) {
       console.error(err);
       setStatus(`❌ Error: ${err.message}`);
     } finally {
-      setUploading(null);
+      setHeroUploading(false);
     }
   };
 
+  // Format price like $1.8M or $625K
   const formatPrice = (price: number): string => {
     if (price >= 1_000_000) {
       return `$${(price / 1_000_000).toFixed(1)}M`;
@@ -234,6 +251,7 @@ export default function RealEstatePage() {
     return `$${price.toLocaleString()}`;
   };
 
+  // Color mapping for property types
   const getTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
       case 'villa': return 'bg-purple-600';
@@ -248,7 +266,7 @@ export default function RealEstatePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* ===== HEADER ===== */}
-      <header className="bg-white shadow-sm border-b">
+      <header className="bg-white shadow-sm border-b z-10 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-8">
@@ -269,47 +287,79 @@ export default function RealEstatePage() {
       </header>
 
       {/* ===== HERO SECTION ===== */}
-      <div className="relative w-full h-[500px] max-h-[60vh] overflow-hidden">
+      <div className="relative h-[60vh] min-h-[400px] max-h-[600px] w-full overflow-hidden">
+        {/* Background Image with Overlay */}
         {heroImageUrl ? (
-          <>
-            <img
-              src={heroImageUrl}
-              alt="Hero background"
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute inset-0 bg-black bg-opacity-40"></div>
-          </>
+          <img
+            src={heroImageUrl}
+            alt="Luxury properties background"
+            className="w-full h-full object-cover brightness-75 transition-all duration-500 hover:brightness-90"
+          />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-r from-indigo-900 to-purple-800 flex items-center justify-center">
-            <div className="text-center text-white">
-              <h2 className="text-4xl md:text-5xl font-bold mb-4">Discover Your Dream Home</h2>
-              <p className="text-lg md:text-xl max-w-2xl mx-auto">
-                Luxury properties handpicked for discerning buyers.
-              </p>
+          <div className="w-full h-full bg-gradient-to-r from-indigo-900 via-purple-800 to-pink-700">
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
+          </div>
+        )}
+        
+        {/* Content Overlay */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4 md:px-8">
+          <div className="max-w-3xl">
+            <h1 className="text-4xl md:text-6xl font-extrabold text-white mb-4 drop-shadow-lg">
+              Discover Your Dream Home
+            </h1>
+            <p className="text-xl md:text-2xl text-white/90 mb-8 drop-shadow-md">
+              Luxury properties in the world's most exclusive locations
+            </p>
+            <div className="flex flex-col sm:flex-row justify-center gap-4">
+              <button className="bg-white text-indigo-700 font-bold px-6 py-3 rounded-full hover:bg-indigo-50 hover:shadow-lg transition transform hover:-translate-y-0.5">
+                Explore Properties
+              </button>
+              <button className="bg-transparent border-2 border-white text-white font-bold px-6 py-3 rounded-full hover:bg-white/10 hover:shadow-lg transition">
+                Schedule a Tour
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Hero Upload Button (Admin Only) */}
+        {userId && (
+          <div className="absolute top-6 right-6 z-20">
+            <div className="relative">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleHeroUpload}
+                disabled={heroUploading}
+                className="hidden"
+                id="hero-upload"
+              />
+              <label
+                htmlFor="hero-upload"
+                className={`cursor-pointer ${heroUploading ? 'opacity-70' : 'hover:opacity-90'}`}
+                title={heroUploading ? "Uploading..." : "Change hero image"}
+              >
+                <div className="flex items-center bg-black/50 text-white px-4 py-2 rounded-full backdrop-blur-sm border border-white/20 hover:border-white/40 transition">
+                  {heroUploading ? (
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4 5a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-1.586a1 1 0 01-.707-.293l-1.121-1.121A2 2 0 0011.172 3H8.828a2 2 0 00-1.414.586L6.293 4.707A1 1 0 015.586 5H4zm6 9a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  <span className="font-medium">
+                    {heroUploading ? 'Uploading...' : 'Change Hero Image'}
+                  </span>
+                </div>
+              </label>
             </div>
           </div>
         )}
-
-        <div className="relative z-10 h-full flex flex-col items-center justify-center text-center text-white px-4">
-          <h2 className="text-4xl md:text-5xl font-bold mb-4 drop-shadow-md">
-            Discover Your Dream Home
-          </h2>
-          <p className="text-lg md:text-xl max-w-2xl mx-auto drop-shadow">
-            Luxury properties handpicked for discerning buyers.
-          </p>
-        </div>
-
-        {userId && (
-          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleHeroUpload}
-              disabled={uploading === 'hero'}
-              className="text-xs text-white file:bg-indigo-700 file:text-white file:px-3 file:py-1 file:rounded file:border-0 hover:file:bg-indigo-600"
-            />
-          </div>
-        )}
+        
+        {/* Decorative Elements */}
+        <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-black/80 to-transparent" />
       </div>
 
       {/* ===== LISTINGS GRID ===== */}
@@ -323,21 +373,25 @@ export default function RealEstatePage() {
             return (
               <div
                 key={listing.id}
-                className="rounded-xl overflow-hidden shadow-lg border border-gray-200 bg-white"
+                className="rounded-xl overflow-hidden shadow-lg border border-gray-200 bg-white hover:shadow-xl transition-shadow duration-300"
               >
+                {/* Image Header */}
                 <div className="relative h-48">
                   {data?.image_url ? (
                     <img
                       src={data.image_url}
                       alt={listing.title}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
                     />
                   ) : (
                     <div className="w-full h-full bg-gradient-to-r from-gray-200 to-gray-300 flex items-center justify-center text-gray-500">
-                      No Image
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
                     </div>
                   )}
-                  <button className="absolute top-3 right-3 bg-white/80 rounded-full p-2 hover:bg-white transition">
+                  {/* Heart Icon */}
+                  <button className="absolute top-3 right-3 bg-white/80 rounded-full p-2 hover:bg-white transition shadow-md">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.682l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
@@ -348,43 +402,39 @@ export default function RealEstatePage() {
                   <div className={`inline-block px-3 py-1 rounded-full text-xs font-semibold text-white mb-2 ${bgColorClass}`}>
                     {data?.type || listing.type}
                   </div>
-
                   <h3 className="font-bold text-lg text-gray-900">{listing.title}</h3>
                   <div className="flex items-center text-sm text-gray-500 mt-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.995 1.995 0 01-2.828 0l-4.244-4.244a8 8 0 1111.314 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                     <span>{data?.location || listing.location}</span>
                   </div>
-
                   <div className="mt-2 text-xl font-bold text-blue-600">
                     {formatPrice(data?.price || listing.price)}
                   </div>
-
                   <div className="flex justify-between items-center mt-3 text-sm text-gray-600">
                     <div className="flex items-center space-x-3">
                       <div className="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v6m3-3a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
                         <span>{data?.beds || listing.beds} beds</span>
                       </div>
                       <div className="flex items-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-2m-2 0h-2m-2 0h-2m-2 0h-2" />
                         </svg>
                         <span>{data?.baths || listing.baths} baths</span>
                       </div>
                     </div>
                     <div className="flex items-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
                       </svg>
                       <span>{data?.sqft || listing.sqft} sqft</span>
                     </div>
                   </div>
-
                   {userId ? (
                     <div className="mt-4">
                       <input
@@ -392,7 +442,7 @@ export default function RealEstatePage() {
                         accept="image/*"
                         onChange={(e) => handleUpload(e, listing.id)}
                         disabled={uploading === listing.id}
-                        className="w-full text-xs border border-gray-300 rounded px-2 py-1"
+                        className="w-full text-xs border border-gray-300 rounded px-2 py-1 file:mr-4 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
                       />
                     </div>
                   ) : (

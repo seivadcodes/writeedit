@@ -46,7 +46,7 @@ export function Header() {
     { name: 'Blog', href: '/blog' },
     { name: 'Editor', href: '/editor' },
     { name: 'Write', href: '/write' },
-     { name: 'Image Analysis', href: '/Images' },
+     { name: 'Image Analysis', href: '/images' },
   ];
 
   return (

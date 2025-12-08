@@ -18,23 +18,24 @@ const LISTINGS = [
   { id: 'cozy-townhouse', title: 'Cozy Townhouse', price: 625000, sqft: 1400, beds: 3, baths: 2, location: 'Brooklyn, New York', type: 'Townhouse' },
 ];
 
+type ListingData = {
+  image_url: string | null;
+  price?: number;
+  sqft?: number;
+  beds?: number;
+  baths?: number;
+  location?: string;
+  type?: string;
+};
+
 export default function RealEstatePage() {
   const [listings, setListings] = useState<{ [key: string]: ListingData }>({});
+  const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  type ListingData = {
-    image_url: string | null;
-    price: number;
-    sqft: number;
-    beds: number;
-    baths: number;
-    location: string;
-    type: string;
-  };
-
-  // Initialize: fetch user + existing listing data
+  // Initialize: fetch user + existing listing data + hero
   useEffect(() => {
     const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -42,16 +43,19 @@ export default function RealEstatePage() {
       setUserId(uid || null);
 
       if (uid) {
+        const titlesToFetch = [...LISTINGS.map(l => l.title), 'Hero Background'];
         const { data, error } = await supabase
           .from('blog_posts')
           .select('title, image_url, content')
           .eq('user_id', uid)
-          .in('title', LISTINGS.map(l => l.title));
+          .in('title', titlesToFetch);
 
         if (error) {
-          console.error('Failed to fetch listings:', error);
+          console.error('Failed to fetch listings and hero:', error);
         } else {
           const initialState: { [key: string]: ListingData } = {};
+
+          // Process property listings
           LISTINGS.forEach((l) => {
             const stored = data.find((row: any) => row.title === l.title);
             if (stored) {
@@ -93,6 +97,11 @@ export default function RealEstatePage() {
               };
             }
           });
+
+          // Process hero
+          const heroRow = data.find((row: any) => row.title === 'Hero Background');
+          setHeroImageUrl(heroRow?.image_url || null);
+
           setListings(initialState);
         }
       }
@@ -122,7 +131,6 @@ export default function RealEstatePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
-      // Save structured content as JSON
       const content = JSON.stringify({
         price: listings[listingId]?.price || listing.price,
         sqft: listings[listingId]?.sqft || listing.sqft,
@@ -130,10 +138,9 @@ export default function RealEstatePage() {
         baths: listings[listingId]?.baths || listing.baths,
         location: listings[listingId]?.location || listing.location,
         type: listings[listingId]?.type || listing.type,
-        description: `Beautiful ${listing.title} property.`
+        description: `Beautiful ${listing.title} property.`,
       });
 
-      // Upsert: delete old + insert new
       await supabase
         .from('blog_posts')
         .delete()
@@ -170,7 +177,54 @@ export default function RealEstatePage() {
     }
   };
 
-  // Format price like $1.8M or $625K
+  const handleHeroUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userId) return;
+
+    setUploading('hero');
+    setStatus(null);
+
+    try {
+      const filePath = `blog/${userId}/hero_${Date.now()}_${file.name}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('blog-images')
+        .upload(filePath, file, { upsert: false });
+
+      if (uploadErr) throw uploadErr;
+
+      const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
+      const imageUrl = data.publicUrl;
+
+      // Upsert hero record
+      await supabase
+        .from('blog_posts')
+        .delete()
+        .eq('user_id', userId)
+        .eq('title', 'Hero Background');
+
+      const { error: insertErr } = await supabase
+        .from('blog_posts')
+        .insert({
+          user_id: userId,
+          title: 'Hero Background',
+          content: '{}',
+          image_url: imageUrl,
+          published: false,
+        });
+
+      if (insertErr) throw insertErr;
+
+      setHeroImageUrl(imageUrl);
+      setStatus('✅ Hero background updated!');
+      e.target.value = '';
+    } catch (err: any) {
+      console.error(err);
+      setStatus(`❌ Error: ${err.message}`);
+    } finally {
+      setUploading(null);
+    }
+  };
+
   const formatPrice = (price: number): string => {
     if (price >= 1_000_000) {
       return `$${(price / 1_000_000).toFixed(1)}M`;
@@ -180,7 +234,6 @@ export default function RealEstatePage() {
     return `$${price.toLocaleString()}`;
   };
 
-  // Color mapping for property types
   const getTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
       case 'villa': return 'bg-purple-600';
@@ -215,6 +268,50 @@ export default function RealEstatePage() {
         </div>
       </header>
 
+      {/* ===== HERO SECTION ===== */}
+      <div className="relative w-full h-[500px] max-h-[60vh] overflow-hidden">
+        {heroImageUrl ? (
+          <>
+            <img
+              src={heroImageUrl}
+              alt="Hero background"
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-black bg-opacity-40"></div>
+          </>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-r from-indigo-900 to-purple-800 flex items-center justify-center">
+            <div className="text-center text-white">
+              <h2 className="text-4xl md:text-5xl font-bold mb-4">Discover Your Dream Home</h2>
+              <p className="text-lg md:text-xl max-w-2xl mx-auto">
+                Luxury properties handpicked for discerning buyers.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="relative z-10 h-full flex flex-col items-center justify-center text-center text-white px-4">
+          <h2 className="text-4xl md:text-5xl font-bold mb-4 drop-shadow-md">
+            Discover Your Dream Home
+          </h2>
+          <p className="text-lg md:text-xl max-w-2xl mx-auto drop-shadow">
+            Luxury properties handpicked for discerning buyers.
+          </p>
+        </div>
+
+        {userId && (
+          <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleHeroUpload}
+              disabled={uploading === 'hero'}
+              className="text-xs text-white file:bg-indigo-700 file:text-white file:px-3 file:py-1 file:rounded file:border-0 hover:file:bg-indigo-600"
+            />
+          </div>
+        )}
+      </div>
+
       {/* ===== LISTINGS GRID ===== */}
       <div className="max-w-7xl mx-auto p-4 md:p-6 mt-6 space-y-10">
         <h2 className="text-2xl font-bold text-gray-800">Featured Properties</h2>
@@ -228,7 +325,6 @@ export default function RealEstatePage() {
                 key={listing.id}
                 className="rounded-xl overflow-hidden shadow-lg border border-gray-200 bg-white"
               >
-                {/* Image Header */}
                 <div className="relative h-48">
                   {data?.image_url ? (
                     <img
@@ -241,7 +337,6 @@ export default function RealEstatePage() {
                       No Image
                     </div>
                   )}
-                  {/* Heart Icon */}
                   <button className="absolute top-3 right-3 bg-white/80 rounded-full p-2 hover:bg-white transition">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.682l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
@@ -249,14 +344,11 @@ export default function RealEstatePage() {
                   </button>
                 </div>
 
-                {/* Content Body */}
                 <div className="p-4">
-                  {/* Type Badge */}
                   <div className={`inline-block px-3 py-1 rounded-full text-xs font-semibold text-white mb-2 ${bgColorClass}`}>
                     {data?.type || listing.type}
                   </div>
 
-                  {/* Title & Location — FIXED: no data?.title */}
                   <h3 className="font-bold text-lg text-gray-900">{listing.title}</h3>
                   <div className="flex items-center text-sm text-gray-500 mt-1">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -266,12 +358,10 @@ export default function RealEstatePage() {
                     <span>{data?.location || listing.location}</span>
                   </div>
 
-                  {/* Price */}
                   <div className="mt-2 text-xl font-bold text-blue-600">
                     {formatPrice(data?.price || listing.price)}
                   </div>
 
-                  {/* Stats */}
                   <div className="flex justify-between items-center mt-3 text-sm text-gray-600">
                     <div className="flex items-center space-x-3">
                       <div className="flex items-center">
@@ -295,7 +385,6 @@ export default function RealEstatePage() {
                     </div>
                   </div>
 
-                  {/* Upload Button */}
                   {userId ? (
                     <div className="mt-4">
                       <input

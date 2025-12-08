@@ -35,83 +35,86 @@ export default function RealEstatePage() {
   const [heroUploading, setHeroUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [adminMode, setAdminMode] = useState(true); // Default to ON for logged-in users
 
   // Initialize: fetch user + existing listing data + hero image
   useEffect(() => {
     const init = async () => {
-      // Get current session (only to enable upload for logged-in users)
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user.id;
       setUserId(uid || null);
 
-      // Fetch ALL existing listings (ignore user_id — show latest per title)
-      const { data: listingsData, error: listingsError } = await supabase
-        .from('blog_posts')
-        .select('title, image_url, content')
-        .in('title', LISTINGS.map(l => l.title));
+      if (uid) {
+        // Fetch listings data
+        const { data: listingsData, error: listingsError } = await supabase
+          .from('blog_posts')
+          .select('title, image_url, content')
+          .eq('user_id', uid)
+          .in('title', LISTINGS.map(l => l.title));
 
-      if (listingsError) {
-        console.error('Failed to fetch listings:', listingsError);
-      }
-
-      const initialState: { [key: string]: ListingData } = {};
-      LISTINGS.forEach((l) => {
-        // Find the most recent (or any) entry for this title
-        const stored = listingsData?.find((row: any) => row.title === l.title);
-        if (stored) {
-          let price = l.price;
-          let sqft = l.sqft;
-          let beds = l.beds;
-          let baths = l.baths;
-          let location = l.location;
-          let type = l.type;
-          try {
-            const content = JSON.parse(stored.content);
-            price = content.price ?? price;
-            sqft = content.sqft ?? sqft;
-            beds = content.beds ?? beds;
-            baths = content.baths ?? baths;
-            location = content.location ?? location;
-            type = content.type ?? type;
-          } catch (e) {
-            // fallback to defaults
-          }
-          initialState[l.id] = {
-            image_url: stored.image_url || null,
-            price,
-            sqft,
-            beds,
-            baths,
-            location,
-            type,
-          };
+        if (listingsError) {
+          console.error('Failed to fetch listings:', listingsError);
         } else {
-          initialState[l.id] = {
-            image_url: null,
-            price: l.price,
-            sqft: l.sqft,
-            beds: l.beds,
-            baths: l.baths,
-            location: l.location,
-            type: l.type,
-          };
+          const initialState: { [key: string]: ListingData } = {};
+          LISTINGS.forEach((l) => {
+            const stored = listingsData.find((row: any) => row.title === l.title);
+            if (stored) {
+              let price = l.price;
+              let sqft = l.sqft;
+              let beds = l.beds;
+              let baths = l.baths;
+              let location = l.location;
+              let type = l.type;
+              try {
+                const content = JSON.parse(stored.content);
+                price = content.price ?? price;
+                sqft = content.sqft ?? sqft;
+                beds = content.beds ?? beds;
+                baths = content.baths ?? baths;
+                location = content.location ?? location;
+                type = content.type ?? type;
+              } catch (e) {
+                // fallback to defaults
+              }
+              initialState[l.id] = {
+                image_url: stored.image_url || null,
+                price,
+                sqft,
+                beds,
+                baths,
+                location,
+                type,
+              };
+            } else {
+              initialState[l.id] = {
+                image_url: null,
+                price: l.price,
+                sqft: l.sqft,
+                beds: l.beds,
+                baths: l.baths,
+                location: l.location,
+                type: l.type,
+              };
+            }
+          });
+          setListings(initialState);
         }
-      });
-      setListings(initialState);
 
-      // Fetch hero image (again, ignore user_id — just get one titled 'hero_image')
-      const { data: heroData, error: heroError } = await supabase
-        .from('blog_posts')
-        .select('image_url')
-        .eq('title', 'hero_image')
-        .single();
+        // Fetch hero image
+        const { data: heroData, error: heroError } = await supabase
+          .from('blog_posts')
+          .select('image_url')
+          .eq('user_id', uid)
+          .eq('title', 'hero_image')
+          .single();
 
-      if (!heroError || heroError.code === 'PGRST116') {
-        if (heroData?.image_url) {
-          setHeroImageUrl(heroData.image_url);
+        if (!heroError || heroError.code === 'PGRST116') { // PGRST116 = no rows found
+          if (heroData) {
+            setHeroImageUrl(heroData.image_url);
+          }
+        } else {
+          console.error('Failed to fetch hero image:', heroError);
         }
-      } else {
-        console.error('Failed to fetch hero image:', heroError);
       }
     };
 
@@ -119,10 +122,9 @@ export default function RealEstatePage() {
   }, []);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, listingId: string) => {
-    if (!userId) return; // safety check
-
+    if (!adminMode) return;
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !userId) return;
 
     setUploading(listingId);
     setStatus(null);
@@ -141,6 +143,7 @@ export default function RealEstatePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
+      // Save structured content as JSON
       const content = JSON.stringify({
         price: listings[listingId]?.price || listing.price,
         sqft: listings[listingId]?.sqft || listing.sqft,
@@ -148,13 +151,14 @@ export default function RealEstatePage() {
         baths: listings[listingId]?.baths || listing.baths,
         location: listings[listingId]?.location || listing.location,
         type: listings[listingId]?.type || listing.type,
-        description: `Beautiful ${listing.title} property.`,
+        description: `Beautiful ${listing.title} property.`
       });
 
-      // Upsert: delete old + insert new (without user_id filter in delete — might leave orphans, but safe for single admin)
+      // Upsert: delete old + insert new
       await supabase
         .from('blog_posts')
         .delete()
+        .eq('user_id', userId)
         .eq('title', listing.title);
 
       const { error: insertErr } = await supabase
@@ -188,10 +192,9 @@ export default function RealEstatePage() {
   };
 
   const handleHeroUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!userId) return;
-
+    if (!adminMode) return;
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !userId) return;
 
     setHeroUploading(true);
     setStatus(null);
@@ -207,11 +210,14 @@ export default function RealEstatePage() {
       const { data } = supabase.storage.from('blog-images').getPublicUrl(filePath);
       const imageUrl = data.publicUrl;
 
+      // Delete existing hero record
       await supabase
         .from('blog_posts')
         .delete()
+        .eq('user_id', userId)
         .eq('title', 'hero_image');
 
+      // Insert new hero record
       const { error: insertErr } = await supabase
         .from('blog_posts')
         .insert({
@@ -238,6 +244,7 @@ export default function RealEstatePage() {
     }
   };
 
+  // Format price like $1.8M or $625K
   const formatPrice = (price: number): string => {
     if (price >= 1_000_000) {
       return `$${(price / 1_000_000).toFixed(1)}M`;
@@ -247,6 +254,7 @@ export default function RealEstatePage() {
     return `$${price.toLocaleString()}`;
   };
 
+  // Color mapping for property types
   const getTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
       case 'villa': return 'bg-purple-600';
@@ -283,6 +291,7 @@ export default function RealEstatePage() {
 
       {/* ===== HERO SECTION ===== */}
       <div className="relative h-[60vh] min-h-[400px] max-h-[600px] w-full overflow-hidden">
+        {/* Background Image with Overlay */}
         {heroImageUrl ? (
           <img
             src={heroImageUrl}
@@ -295,6 +304,7 @@ export default function RealEstatePage() {
           </div>
         )}
         
+        {/* Content Overlay */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4 md:px-8">
           <div className="max-w-3xl">
             <h1 className="text-4xl md:text-6xl font-extrabold text-white mb-4 drop-shadow-lg">
@@ -314,8 +324,8 @@ export default function RealEstatePage() {
           </div>
         </div>
 
-        {/* Hero Upload Button — only visible if logged in */}
-        {userId && (
+        {/* Hero Upload Button (Admin Only) */}
+        {userId && adminMode && (
           <div className="absolute top-6 right-6 z-20">
             <div className="relative">
               <input
@@ -350,7 +360,25 @@ export default function RealEstatePage() {
             </div>
           </div>
         )}
+
+        {/* Tiny Admin Toggle (only if logged in) */}
+        {userId && (
+          <div className="absolute top-6 left-6 z-20">
+            <button
+              onClick={() => setAdminMode(!adminMode)}
+              className={`text-xs px-2 py-1 rounded-full font-mono ${
+                adminMode
+                  ? 'bg-green-500 text-white'
+                  : 'bg-gray-500 text-white'
+              }`}
+              title={adminMode ? 'Disable admin mode' : 'Enable admin mode'}
+            >
+              {adminMode ? 'ADMIN ON' : 'ADMIN OFF'}
+            </button>
+          </div>
+        )}
         
+        {/* Decorative Elements */}
         <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-black/80 to-transparent" />
       </div>
 
@@ -367,6 +395,7 @@ export default function RealEstatePage() {
                 key={listing.id}
                 className="rounded-xl overflow-hidden shadow-lg border border-gray-200 bg-white hover:shadow-xl transition-shadow duration-300"
               >
+                {/* Image Header */}
                 <div className="relative h-48">
                   {data?.image_url ? (
                     <img
@@ -381,6 +410,7 @@ export default function RealEstatePage() {
                       </svg>
                     </div>
                   )}
+                  {/* Heart Icon */}
                   <button className="absolute top-3 right-3 bg-white/80 rounded-full p-2 hover:bg-white transition shadow-md">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.682l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
@@ -426,8 +456,8 @@ export default function RealEstatePage() {
                     </div>
                   </div>
 
-                  {/* Only show upload input if user is logged in — no message otherwise */}
-                  {userId && (
+                  {/* Admin Upload Input */}
+                  {userId && adminMode && (
                     <div className="mt-4">
                       <input
                         type="file"

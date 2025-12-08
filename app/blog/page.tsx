@@ -5,6 +5,7 @@ import { Suspense, useState, useEffect, useRef } from 'react';
 import { use } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
+import { PageWithChrome } from '@/components/PageWithChrome';
 
 // --- Supabase client ---
 const supabase = createClient(
@@ -217,58 +218,58 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
   };
 
   const generateWithAI = async () => {
-  const trimmedPrompt = aiPrompt.trim();
-  if (!trimmedPrompt) {
-    setAiStatus({ type: 'error', msg: 'Please enter a topic.' });
-    return;
-  }
-
-  setIsGenerating(true);
-  setAiStatus({ type: 'info', msg: 'Generating your blog post...' });
-
-  try {
-    // ✅ Send BOTH input AND instruction
-    const res = await fetch('/api/edit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: trimmedPrompt,                          // ← REQUIRED by backend
-        instruction: `Write a complete, well-structured blog post about: "${trimmedPrompt}"`, // ← guidance
-        model: 'x-ai/grok-4.1-fast:free',
-        editLevel: 'custom',                           // ← 'generate' is not a valid level
-        useEditorialBoard: false,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Generation failed');
+    const trimmedPrompt = aiPrompt.trim();
+    if (!trimmedPrompt) {
+      setAiStatus({ type: 'error', msg: 'Please enter a topic.' });
+      return;
     }
 
-    const { editedText } = await res.json();
+    setIsGenerating(true);
+    setAiStatus({ type: 'info', msg: 'Generating your blog post...' });
 
-    // ❗ The backend returns editedText, but for generation,
-    // we need to extract title + content — currently it returns plain text.
-    // So we’ll assume the AI returns: "Title\n\nParagraph1\n\nParagraph2..."
-    const [title, ...contentParts] = editedText.split('\n\n');
-    const content = contentParts.join('\n\n').trim();
+    try {
+      // ✅ Send BOTH input AND instruction
+      const res = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input: trimmedPrompt, // ← REQUIRED by backend
+          instruction: `Write a complete, well-structured blog post about: "${trimmedPrompt}"`, // ← guidance
+          model: 'x-ai/grok-4.1-fast:free',
+          editLevel: 'custom', // ← 'generate' is not a valid level
+          useEditorialBoard: false,
+        }),
+      });
 
-    if (!title.trim() || !content.trim()) {
-      throw new Error('AI response missing title or content');
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Generation failed');
+      }
+
+      const { editedText } = await res.json();
+
+      // ❗ The backend returns editedText, but for generation,
+      // we need to extract title + content — currently it returns plain text.
+      // So we’ll assume the AI returns: "Title\n\nParagraph1\n\nParagraph2..."
+      const [title, ...contentParts] = editedText.split('\n\n');
+      const content = contentParts.join('\n\n').trim();
+
+      if (!title.trim() || !content.trim()) {
+        throw new Error('AI response missing title or content');
+      }
+
+      setAiGenerated({
+        title: title.trim(),
+        content: content.trim(),
+      });
+      setAiStatus({ type: 'success', msg: '✅ Generation successful!' });
+    } catch (err: any) {
+      console.error('AI Generation Error:', err);
+      setAiStatus({ type: 'error', msg: `❌ ${err.message}` });
+    } finally {
+      setIsGenerating(false);
     }
-
-    setAiGenerated({
-      title: title.trim(),
-      content: content.trim(),
-    });
-    setAiStatus({ type: 'success', msg: '✅ Generation successful!' });
-  } catch (err: any) {
-    console.error('AI Generation Error:', err);
-    setAiStatus({ type: 'error', msg: `❌ ${err.message}` });
-  } finally {
-    setIsGenerating(false);
-  }
-};
+  };
 
   // --- Helpers ---
   const openEditModal = (post?: Partial<BlogPost> | null) => {
@@ -631,10 +632,12 @@ function BlogClient({ searchParams }: { searchParams: Promise<{ post?: string }>
 // --- Main Page (Server Component) ---
 export default function BlogPage({ searchParams }: { searchParams: Promise<{ post?: string }> }) {
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6">
-      <Suspense fallback={<div className="text-center py-12">Loading blog...</div>}>
-        <BlogClient searchParams={searchParams} />
-      </Suspense>
-    </div>
+    <PageWithChrome>
+      <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6">
+        <Suspense fallback={<div className="text-center py-12">Loading blog...</div>}>
+          <BlogClient searchParams={searchParams} />
+        </Suspense>
+      </div>
+    </PageWithChrome>
   );
 }

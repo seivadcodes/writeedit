@@ -475,6 +475,118 @@ export default function RealEstatePage() {
         </div>
       </div>
 
+      {/* ===== WHY CLIENTS CHOOSE US ===== */}
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-16 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-2xl my-12">
+        <div className="text-center max-w-3xl mx-auto mb-12">
+          <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+            Why Top Agents Trust LuxEstate Tech
+          </h2>
+          <p className="text-lg text-gray-700">
+            We don’t just build websites—we build lead-generating, brand-elevating digital experiences that close high-value deals.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {[
+            {
+              title: "Stunning Visual Storytelling",
+              desc: "High-res imagery, immersive galleries, and cinematic hero sections that make properties irresistible.",
+              icon: "📸"
+            },
+            {
+              title: "Real-Time Property Management",
+              desc: "Agents update listings, prices, and photos instantly—no developer needed. Built-in admin controls save hours weekly.",
+              icon: "⚡"
+            },
+            {
+              title: "Built for Luxury Conversions",
+              desc: "Strategic CTAs, seamless tour scheduling, and lead capture forms designed to turn browsers into buyers.",
+              icon: "💼"
+            }
+          ].map((item, idx) => (
+            <div key={idx} className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition">
+              <div className="text-4xl mb-4">{item.icon}</div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">{item.title}</h3>
+              <p className="text-gray-600">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="text-center mt-12">
+          <button className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold px-8 py-4 rounded-full text-lg hover:shadow-xl transition transform hover:-translate-y-1">
+            Get Your Custom Luxury Site →
+          </button>
+          <p className="text-gray-600 mt-4 text-sm">
+            Fully managed. White-glove service. Ready in 14 days.
+          </p>
+        </div>
+      </div>
+
+      {/* ===== FOOTER ===== */}
+      <footer className="bg-gray-900 text-white mt-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            {/* Brand */}
+            <div>
+              <h3 className="text-xl font-bold text-indigo-400 mb-4">LuxEstate</h3>
+              <p className="text-gray-400 text-sm">
+                Curating the world’s most exclusive properties for discerning clients.
+              </p>
+              <div className="flex space-x-4 mt-4">
+                {['twitter', 'instagram', 'linkedin', 'facebook'].map((platform) => (
+                  <a key={platform} href="#" className="text-gray-400 hover:text-white transition" aria-label={platform}>
+                    <span className="sr-only">{platform}</span>
+                    {/* Replace with real icons in production (e.g., react-icons) */}
+                    <div className="h-5 w-5 bg-gray-700 rounded-full flex items-center justify-center text-xs">
+                      {platform[0].toUpperCase()}
+                    </div>
+                  </a>
+                ))}
+              </div>
+            </div>
+
+            {/* Quick Links */}
+            <div>
+              <h4 className="font-semibold mb-4">Explore</h4>
+              <ul className="space-y-2 text-gray-400">
+                {['Featured Listings', 'New Developments', 'Luxury Rentals', 'Investment Opportunities'].map((item) => (
+                  <li key={item}>
+                    <a href="#" className="hover:text-white transition">{item}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Resources */}
+            <div>
+              <h4 className="font-semibold mb-4">Resources</h4>
+              <ul className="space-y-2 text-gray-400">
+                {['Buying Guide', 'Selling Tips', 'Market Reports', 'Neighborhood Insights'].map((item) => (
+                  <li key={item}>
+                    <a href="#" className="hover:text-white transition">{item}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Contact */}
+            <div>
+              <h4 className="font-semibold mb-4">Contact Us</h4>
+              <address className="text-gray-400 not-italic text-sm space-y-2">
+                <p>123 Prestige Avenue</p>
+                <p>Beverly Hills, CA 90210</p>
+                <p className="mt-2">info@luxestate.example</p>
+                <p>+1 (555) 123-4567</p>
+              </address>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-800 mt-10 pt-6 text-center text-gray-500 text-sm">
+            © {new Date().getFullYear()} LuxEstate. All rights reserved. | Crafted for elite real estate visionaries.
+          </div>
+        </div>
+      </footer>
+
       {/* Status Toast */}
       {status && (
         <div className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg text-center z-50 ${

@@ -371,7 +371,6 @@ export default function RealEstatePage() {
               }`}
               title={adminMode ? 'Disable admin mode' : 'Enable admin mode'}
             >
-              {/* Optional: inner dot for visual feedback */}
               <div className="w-3 h-3 rounded-full bg-white opacity-80"></div>
             </button>
           </div>
@@ -424,8 +423,7 @@ export default function RealEstatePage() {
                   <h3 className="font-bold text-lg text-gray-900">{listing.title}</h3>
                   <div className="flex items-center text-sm text-gray-500 mt-1">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.995 1.995 0 01-2.828 0l-4.244-4.244a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.995 1.995 0 01-2.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     <span>{data?.location || listing.location}</span>
                   </div>
@@ -474,33 +472,33 @@ export default function RealEstatePage() {
         </div>
       </div>
 
-      {/* ===== WHY CLIENTS CHOOSE US ===== */}
+      {/* ===== WHY CLIENTS CHOOSE US (REAL ESTATE FOCUSED) ===== */}
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-16 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-2xl my-12">
         <div className="text-center max-w-3xl mx-auto mb-12">
           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-            Why Top Agents Trust LuxEstate Tech
+            Why Discerning Buyers Choose LuxEstate
           </h2>
           <p className="text-lg text-gray-700">
-            We don’t just build websites—we build lead-generating, brand-elevating digital experiences that close high-value deals.
+            From oceanfront villas to Manhattan penthouses, we connect elite buyers with the world’s most exceptional properties—backed by white-glove service and local expertise.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {[
             {
-              title: "Stunning Visual Storytelling",
-              desc: "High-res imagery, immersive galleries, and cinematic hero sections that make properties irresistible.",
-              icon: "📸"
+              title: "Exclusive Access",
+              desc: "Off-market listings and pre-launch opportunities not available on public platforms.",
+              icon: "🔑"
             },
             {
-              title: "Real-Time Property Management",
-              desc: "Agents update listings, prices, and photos instantly—no developer needed. Built-in admin controls save hours weekly.",
-              icon: "⚡"
+              title: "Global Network",
+              desc: "Direct partnerships with top-tier agents in Beverly Hills, London, Dubai, and beyond.",
+              icon: "🌍"
             },
             {
-              title: "Built for Luxury Conversions",
-              desc: "Strategic CTAs, seamless tour scheduling, and lead capture forms designed to turn browsers into buyers.",
-              icon: "💼"
+              title: "Discreet & Personalized",
+              desc: "Private viewings, confidential transactions, and dedicated advisors who understand your lifestyle.",
+              icon: "✨"
             }
           ].map((item, idx) => (
             <div key={idx} className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition">
@@ -513,10 +511,10 @@ export default function RealEstatePage() {
 
         <div className="text-center mt-12">
           <button className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold px-8 py-4 rounded-full text-lg hover:shadow-xl transition transform hover:-translate-y-1">
-            Get Your Custom Luxury Site →
+            Speak With a LuxEstate Advisor →
           </button>
           <p className="text-gray-600 mt-4 text-sm">
-            Fully managed. White-glove service. Ready in 14 days.
+            Personalized service. Global reach. Unmatched discretion.
           </p>
         </div>
       </div>
@@ -535,7 +533,6 @@ export default function RealEstatePage() {
                 {['twitter', 'instagram', 'linkedin', 'facebook'].map((platform) => (
                   <a key={platform} href="#" className="text-gray-400 hover:text-white transition" aria-label={platform}>
                     <span className="sr-only">{platform}</span>
-                    {/* Replace with real icons in production (e.g., react-icons) */}
                     <div className="h-5 w-5 bg-gray-700 rounded-full flex items-center justify-center text-xs">
                       {platform[0].toUpperCase()}
                     </div>
@@ -581,7 +578,7 @@ export default function RealEstatePage() {
           </div>
 
           <div className="border-t border-gray-800 mt-10 pt-6 text-center text-gray-500 text-sm">
-            © {new Date().getFullYear()} LuxEstate. All rights reserved. | Crafted for elite real estate visionaries.
+            © {new Date().getFullYear()} LuxEstate. All rights reserved. | Curated luxury real estate experiences.
           </div>
         </div>
       </footer>

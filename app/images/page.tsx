@@ -1,8 +1,8 @@
-// app/page.tsx
+// app/images/page.tsx
 'use client';
 
 import { useState } from 'react';
-import { PageWithChrome } from '@/components/PageWithChrome'; // ✅ Import wrapper
+import { PageWithChrome } from '@/components/PageWithChrome';
 
 export default function VisionPage() {
   const [image, setImage] = useState<File | null>(null);
@@ -62,35 +62,42 @@ export default function VisionPage() {
   };
 
   return (
-    <PageWithChrome> {/* ✅ Wrap all your content */}
-      <div style={{
-        fontFamily: 'Segoe UI, Roboto, Helvetica, Arial, sans-serif',
-        maxWidth: '800px',
-        margin: '2rem auto',
-        padding: '2rem',
-        backgroundColor: '#fff',
-        borderRadius: '12px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-        color: '#333',
-      }}>
-        <h1 style={{
-          fontSize: '2rem',
-          fontWeight: '600',
-          marginBottom: '1rem',
-          color: '#2c3e50',
-        }}>
+    <PageWithChrome>
+      <div
+        style={{
+          fontFamily: 'Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+          maxWidth: '800px',
+          margin: '2rem auto',
+          padding: '2rem',
+          backgroundColor: '#fff',
+          borderRadius: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+          color: '#333',
+        }}
+      >
+        <h1
+          style={{
+            fontSize: '2rem',
+            fontWeight: '600',
+            marginBottom: '1rem',
+            color: '#2c3e50',
+          }}
+        >
           🖼️ Vision Analysis with AI
         </h1>
 
         <form onSubmit={handleSubmit} style={{ marginBottom: '2rem' }}>
           <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="prompt" style={{
-              display: 'block',
-              fontSize: '1rem',
-              fontWeight: '500',
-              marginBottom: '0.5rem',
-              color: '#2c3e50',
-            }}>
+            <label
+              htmlFor="prompt"
+              style={{
+                display: 'block',
+                fontSize: '1rem',
+                fontWeight: '500',
+                marginBottom: '0.5rem',
+                color: '#2c3e50',
+              }}
+            >
               Prompt:
             </label>
             <input
@@ -107,19 +114,22 @@ export default function VisionPage() {
                 fontSize: '1rem',
                 transition: 'border-color 0.2s',
               }}
-              onFocus={(e) => e.target.style.borderColor = '#0070f3'}
-              onBlur={(e) => e.target.style.borderColor = '#ddd'}
+              onFocus={(e) => (e.target.style.borderColor = '#0070f3')}
+              onBlur={(e) => (e.target.style.borderColor = '#ddd')}
             />
           </div>
 
           <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="image" style={{
-              display: 'block',
-              fontSize: '1rem',
-              fontWeight: '500',
-              marginBottom: '0.5rem',
-              color: '#2c3e50',
-            }}>
+            <label
+              htmlFor="image"
+              style={{
+                display: 'block',
+                fontSize: '1rem',
+                fontWeight: '500',
+                marginBottom: '0.5rem',
+                color: '#2c3e50',
+              }}
+            >
               Upload Image:
             </label>
             <input
@@ -139,10 +149,7 @@ export default function VisionPage() {
           </div>
 
           {preview && (
-            <div style={{
-              marginTop: '1rem',
-              textAlign: 'center',
-            }}>
+            <div style={{ marginTop: '1rem', textAlign: 'center' }}>
               <img
                 src={preview}
                 alt="Uploaded preview"
@@ -184,8 +191,14 @@ export default function VisionPage() {
           >
             {loading ? (
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style={{ animation: 'spin 1s linear infinite' }}>
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                <svg
+                  width="16"
+                  height="16"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                  style={{ animation: 'spin 1s linear infinite' }} // ✅ Uses global @keyframes
+                >
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 </svg>
                 Analyzing...
               </span>
@@ -196,51 +209,47 @@ export default function VisionPage() {
         </form>
 
         {error && (
-          <div style={{
-            padding: '1rem',
-            backgroundColor: '#ffebee',
-            border: '1px solid #ef9a9a',
-            borderRadius: '8px',
-            marginBottom: '1rem',
-            color: '#c62828',
-          }}>
+          <div
+            style={{
+              padding: '1rem',
+              backgroundColor: '#ffebee',
+              border: '1px solid #ef9a9a',
+              borderRadius: '8px',
+              marginBottom: '1rem',
+              color: '#c62828',
+            }}
+          >
             ❌ {error}
           </div>
         )}
 
         {answer && (
-          <div style={{
-            padding: '1.5rem',
-            backgroundColor: '#f8f9fa',
-            border: '1px solid #dee2e6',
-            borderRadius: '8px',
-            marginTop: '1rem',
-            fontSize: '1rem',
-            lineHeight: '1.6',
-            color: '#333',
-          }}>
-            <h2 style={{
-              fontSize: '1.25rem',
-              fontWeight: '600',
-              marginBottom: '0.5rem',
-              color: '#2c3e50',
-            }}>
+          <div
+            style={{
+              padding: '1.5rem',
+              backgroundColor: '#f8f9fa',
+              border: '1px solid #dee2e6',
+              borderRadius: '8px',
+              marginTop: '1rem',
+              fontSize: '1rem',
+              lineHeight: '1.6',
+              color: '#333',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                marginBottom: '0.5rem',
+                color: '#2c3e50',
+              }}
+            >
               🤖 AI Response
             </h2>
-            <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {answer}
-            </p>
+            <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{answer}</p>
           </div>
         )}
-
-        {/* Spinner animation */}
-        <style jsx>{`
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `}</style>
       </div>
-    </PageWithChrome> {/* ✅ Close wrapper */}
+    </PageWithChrome>
   );
 }

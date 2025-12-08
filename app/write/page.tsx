@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { PageWithChrome } from '@/components/PageWithChrome';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -990,159 +991,161 @@ export default function WritePage() {
 
   // --- Render UI ---
   return (
-    <div className="writing-app">
-      {/* Sidebar */}
-      <div className={`drafts-sidebar ${sidebarOpen ? 'active' : ''}`}>
-        <div className="sidebar-header">
-          <h3>Your Drafts</h3>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              resetHistory();
-              if (canvasRef.current) canvasRef.current.textContent = '';
-              if (titleRef.current) titleRef.current.value = 'Untitled Draft';
-              setCurrentDraftId(null);
-              setIsDirty(false);
-              currentSelectionRangeRef.current = null;
-              captureHistoryState();
-              updateWordCount();
-              updateAutosaveStatus('New draft ready – start typing!', 'info');
-              if (window.innerWidth <= 768) setSidebarOpen(false);
-            }}
-          >
-            📄 New
-          </button>
-          <button className="btn" id="close-sidebar-btn" onClick={() => setSidebarOpen(false)}>
-            ×
-          </button>
-        </div>
-        <div className="drafts-list">
-          {drafts.length > 0 ? (
-            drafts.map((d) => (
-              <div
-                key={d.id}
-                className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
-                onClick={() => {
-                  loadDraft(d.id);
-                  if (window.innerWidth <= 768) setSidebarOpen(false);
-                }}
-              >
-                <span className="draft-title">{escapeHtml(d.title)}</span>
-                <span className="draft-time">{d.lastEdited}</span>
-              </div>
-            ))
-          ) : (
-            <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
-              No drafts yet
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Main Writing Area */}
-      <div className="writing-main">
-        <div className="writing-header">
-          <input
-            type="text"
-            ref={titleRef}
-            placeholder="Untitled Draft"
-            defaultValue="Untitled Draft"
-            id="draft-title"
-          />
-          <button className="mobile-drafts-toggle" onClick={() => setSidebarOpen(true)}>
-            Drafts
-          </button>
-          <div className="ai-controls-group">
-            <div className="ai-controls-top">
-              <button className="btn ai-btn" onClick={handleGenerateSpark}>
-                ✨ Spark
-              </button>
-              <button className="btn ai-btn" onClick={handleRewriteSelection}>
-                🧠 Rewrite
-              </button>
-              <button className="btn ai-btn" onClick={handleAdjustTone}>
-                🎭 Tone
-              </button>
-            </div>
-            <div className="ai-controls-bottom">
-              <button className="btn ai-btn" onClick={handleExpandText}>
-                📈 Expand
-              </button>
-              <button className="btn ai-btn" onClick={handleCondenseText}>
-                📉 Condense
-              </button>
-            </div>
-          </div>
-          <div className="header-actions">
-            <div className="history-controls">
-              <button className="btn history-btn" onClick={undo} title="Undo (Ctrl+Z)">
-                ↩️
-              </button>
-              <button className="btn history-btn" onClick={redo} title="Redo (Ctrl+Y)">
-                ↪️
-              </button>
-            </div>
-            <span className={`autosave-status autosave-${autosaveStatusType}`}>{autosaveStatus}</span>
+    <PageWithChrome>
+      <div className="writing-app">
+        {/* Sidebar */}
+        <div className={`drafts-sidebar ${sidebarOpen ? 'active' : ''}`}>
+          <div className="sidebar-header">
+            <h3>Your Drafts</h3>
             <button
-              className="btn"
-              onClick={async () => {
-                if (!currentDraftId) {
-                  showToast('Save your draft first', 'info');
-                  return;
-                }
-                const userId = await getCurrentUserId();
-                if (!userId) {
-                  showToast('Log in to save versions', 'info');
-                  return;
-                }
-                const content = canvasRef.current?.textContent || '';
-                const { error } = await supabase.from('versions').insert({ draft_id: currentDraftId, content });
-                if (error) showToast('Version failed', 'error');
-                else showToast('Version saved', 'success');
+              className="btn btn-primary"
+              onClick={() => {
+                resetHistory();
+                if (canvasRef.current) canvasRef.current.textContent = '';
+                if (titleRef.current) titleRef.current.value = 'Untitled Draft';
+                setCurrentDraftId(null);
+                setIsDirty(false);
+                currentSelectionRangeRef.current = null;
+                captureHistoryState();
+                updateWordCount();
+                updateAutosaveStatus('New draft ready – start typing!', 'info');
+                if (window.innerWidth <= 768) setSidebarOpen(false);
               }}
             >
-              💾 Version
+              📄 New
+            </button>
+            <button className="btn" id="close-sidebar-btn" onClick={() => setSidebarOpen(false)}>
+              ×
             </button>
           </div>
+          <div className="drafts-list">
+            {drafts.length > 0 ? (
+              drafts.map((d) => (
+                <div
+                  key={d.id}
+                  className={`draft-item ${d.id === currentDraftId ? 'active' : ''}`}
+                  onClick={() => {
+                    loadDraft(d.id);
+                    if (window.innerWidth <= 768) setSidebarOpen(false);
+                  }}
+                >
+                  <span className="draft-title">{escapeHtml(d.title)}</span>
+                  <span className="draft-time">{d.lastEdited}</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: '16px', color: '#888', textAlign: 'center' }}>
+                No drafts yet
+              </div>
+            )}
+          </div>
         </div>
-        <div
-          ref={canvasRef}
-          contentEditable
-          className="writing-canvas"
-          data-placeholder="Start writing your masterpiece…"
-          onInput={handleInput}
-          // We no longer need onSelect, onMouseUp, etc. for AI logic
-        >
-        </div>
-        <div className="writing-footer">
-          <span>{wordCount} words</span>
-        </div>
-      </div>
 
-      {/* Toast */}
-      {toast && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            padding: '12px 20px',
-            borderRadius: '8px',
-            color: 'white',
-            fontWeight: 500,
-            backgroundColor:
-              toast.type === 'success'
-                ? '#4caf50'
-                : toast.type === 'error'
-                ? '#f44336'
-                : '#2196f3',
-            zIndex: 1001,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          }}
-        >
-          {toast.message}
+        {/* Main Writing Area */}
+        <div className="writing-main">
+          <div className="writing-header">
+            <input
+              type="text"
+              ref={titleRef}
+              placeholder="Untitled Draft"
+              defaultValue="Untitled Draft"
+              id="draft-title"
+            />
+            <button className="mobile-drafts-toggle" onClick={() => setSidebarOpen(true)}>
+              Drafts
+            </button>
+            <div className="ai-controls-group">
+              <div className="ai-controls-top">
+                <button className="btn ai-btn" onClick={handleGenerateSpark}>
+                  ✨ Spark
+                </button>
+                <button className="btn ai-btn" onClick={handleRewriteSelection}>
+                  🧠 Rewrite
+                </button>
+                <button className="btn ai-btn" onClick={handleAdjustTone}>
+                  🎭 Tone
+                </button>
+              </div>
+              <div className="ai-controls-bottom">
+                <button className="btn ai-btn" onClick={handleExpandText}>
+                  📈 Expand
+                </button>
+                <button className="btn ai-btn" onClick={handleCondenseText}>
+                  📉 Condense
+                </button>
+              </div>
+            </div>
+            <div className="header-actions">
+              <div className="history-controls">
+                <button className="btn history-btn" onClick={undo} title="Undo (Ctrl+Z)">
+                  ↩️
+                </button>
+                <button className="btn history-btn" onClick={redo} title="Redo (Ctrl+Y)">
+                  ↪️
+                </button>
+              </div>
+              <span className={`autosave-status autosave-${autosaveStatusType}`}>{autosaveStatus}</span>
+              <button
+                className="btn"
+                onClick={async () => {
+                  if (!currentDraftId) {
+                    showToast('Save your draft first', 'info');
+                    return;
+                  }
+                  const userId = await getCurrentUserId();
+                  if (!userId) {
+                    showToast('Log in to save versions', 'info');
+                    return;
+                  }
+                  const content = canvasRef.current?.textContent || '';
+                  const { error } = await supabase.from('versions').insert({ draft_id: currentDraftId, content });
+                  if (error) showToast('Version failed', 'error');
+                  else showToast('Version saved', 'success');
+                }}
+              >
+                💾 Version
+              </button>
+            </div>
+          </div>
+          <div
+            ref={canvasRef}
+            contentEditable
+            className="writing-canvas"
+            data-placeholder="Start writing your masterpiece…"
+            onInput={handleInput}
+            // We no longer need onSelect, onMouseUp, etc. for AI logic
+          >
+          </div>
+          <div className="writing-footer">
+            <span>{wordCount} words</span>
+          </div>
         </div>
-      )}
-    </div>
+
+        {/* Toast */}
+        {toast && (
+          <div
+            style={{
+              position: 'fixed',
+              bottom: '24px',
+              right: '24px',
+              padding: '12px 20px',
+              borderRadius: '8px',
+              color: 'white',
+              fontWeight: 500,
+              backgroundColor:
+                toast.type === 'success'
+                  ? '#4caf50'
+                  : toast.type === 'error'
+                  ? '#f44336'
+                  : '#2196f3',
+              zIndex: 1001,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            }}
+          >
+            {toast.message}
+          </div>
+        )}
+      </div>
+    </PageWithChrome>
   );
 }

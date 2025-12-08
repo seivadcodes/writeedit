@@ -196,7 +196,7 @@ export default function VisionPage() {
                   height="16"
                   fill="currentColor"
                   viewBox="0 0 24 24"
-                  style={{ animation: 'spin 1s linear infinite' }} // ✅ Uses global @keyframes
+                  style={{ animation: 'spin 1s linear infinite' }}
                 >
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 </svg>

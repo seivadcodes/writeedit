@@ -688,7 +688,6 @@ export default function WritePage() {
  const handleGenerateSpark = async () => {
   if (!canvasRef.current || !titleRef.current) return;
 
-  // Always capture current state before AI call
   captureHistoryState();
   setIsAiOperation(true);
 
@@ -699,53 +698,53 @@ export default function WritePage() {
   let prompt: string;
 
   if (isEmpty) {
-    // Start fresh — use title if meaningful, otherwise generic
+    // Start fresh — avoid using "Untitled Draft" as meaningful title
     const effectiveTitle = title === 'Untitled Draft' ? 'a new story' : title;
-    prompt = `You are a master storyteller. Write exactly one vivid, engaging, grammatically correct English sentence to begin a story titled "${effectiveTitle}". DO NOT use quotation marks, markdown, bullet points, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`;
+    prompt = `You are a master storyteller. Write exactly one vivid, engaging, grammatically correct English sentence to begin a story titled "${effectiveTitle}". DO NOT use quotation marks, markdown, bullet points, subtitles, JSON, or explanations. Return ONLY the sentence itself, ending with a period.`;
   } else {
-    // ✅ Use last 250 characters of user's actual writing as context
+    // ✅ CRITICAL: Include actual user text (last 250 chars) as narrative context
     const context = fullContent.length > 250
       ? fullContent.slice(-250).trim()
       : fullContent;
 
-    prompt = `You are a master storyteller. Continue the following narrative in exactly one natural, flowing, grammatically correct English sentence. DO NOT summarize, conclude, add commentary, or introduce new plot points abruptly. Keep tone and style consistent. DO NOT use quotes, markdown, JSON, bullet points, or titles. Return ONLY the sentence, ending with a period.\n\nNarrative so far: "${context}"`;
+    prompt = `You are a master storyteller. Continue the following narrative in exactly one natural, flowing, grammatically correct English sentence. DO NOT summarize, conclude, add commentary, or introduce abrupt new ideas. Maintain the existing tone and style. DO NOT use quotes, markdown, JSON, bullet points, titles, or extra text. Return ONLY the sentence, ending with a period.\n\nNarrative so far: "${context}"`;
   }
 
   try {
     updateAutosaveStatus('✨ Generating spark...', 'saving');
+
+    // ✅ Keep using `instruction` (since your other modes work with it)
+    // ✅ Also include `input` as fallback context (harmless if unused)
     const data = await callAiApi({
-      input: prompt, // ← send full prompt as input
+      input: fullContent,        // ← helpful if API uses it
+      instruction: prompt,       // ← your working field
       model: 'x-ai/grok-4.1-fast:free',
       editLevel: 'generate',
     });
 
-    // Extract raw text robustly
+    // Extract and clean response
     let text = data.generatedPost?.content || data.generatedPost || data.editedText || '';
 
-    // Try to clean up accidental JSON or wrapper objects
+    // Handle accidental JSON wrappers
     if (text.startsWith('{') && text.endsWith('}')) {
       try {
         const parsed = JSON.parse(text);
         text = parsed.excerpt || parsed.content || parsed.generatedPost || '';
-      } catch (e) {
-        // If JSON parse fails, keep original text
-      }
+      } catch {}
     }
 
-    // Extract first valid sentence
+    // Extract first proper sentence
     let sentence = '';
     const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
     if (firstSentenceMatch) {
       sentence = firstSentenceMatch[0];
     } else {
-      // Fallback: take first line and force punctuation
       sentence = (text.split('\n')[0] || '').trim();
       if (sentence && !/[.!?]$/.test(sentence)) {
         sentence += '.';
       }
     }
 
-    // Ensure we have *something*
     if (!sentence.trim()) {
       sentence = 'And so the story continued.';
     }
@@ -758,19 +757,18 @@ export default function WritePage() {
       const selection = window.getSelection();
       if (selection && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
-        range.collapse(false); // insert at cursor
+        range.collapse(false);
         range.insertNode(document.createTextNode(' ' + sentence + ' '));
         range.collapse(false);
         selection.removeAllRanges();
         selection.addRange(range);
       } else {
-        // Append if no cursor
         canvasRef.current.textContent += ' ' + sentence + ' ';
       }
     }
     setIsApplyingHistory(false);
 
-    // Finalize
+    // Final updates
     captureHistoryState();
     setIsDirty(true);
     updateWordCount();

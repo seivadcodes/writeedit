@@ -1,6 +1,5 @@
 // app/write/page.tsx
 'use client';
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { PageWithChrome } from '@/components/PageWithChrome';
@@ -84,8 +83,6 @@ export default function WritePage() {
   const pendingHistoryCaptureRef = useRef<NodeJS.Timeout | null>(null);
   const currentSelectionRangeRef = useRef<Range | null>(null);
   const variationPickerRef = useRef<HTMLDivElement | null>(null);
-
-  // 🔥 NEW: Use a ref to store the last valid selection text (survives blur/click)
   const lastValidSelectionTextRef = useRef<string | null>(null);
 
   // --- State (keep for UI only, not logic) ---
@@ -102,8 +99,6 @@ export default function WritePage() {
   const [wordCount, setWordCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-
-  // (Optional) Keep this if you want to show selection UI (e.g., highlight buttons)
   const [hasActiveSelection, setHasActiveSelection] = useState(false);
 
   // --- Toast ---
@@ -210,7 +205,6 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = null;
     }
     currentSelectionRangeRef.current = null;
-    // Clear selection ref when starting fresh
     lastValidSelectionTextRef.current = null;
   };
 
@@ -224,18 +218,14 @@ export default function WritePage() {
       pendingHistoryCaptureRef.current = setTimeout(captureHistoryState, HISTORY_OPTIONS.THROTTLE_DELAY);
       return;
     }
-
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
     if (!canvas || !titleEl) return;
-
     const content = canvas.textContent || '';
     const title = titleEl.value || 'Untitled Draft';
     const selection = saveSelectionState();
-
     const lastState = historyStack[currentHistoryIndex];
     if (lastState && lastState.content === content && lastState.title === title) return;
-
     let newStack = historyStack.slice(0, currentHistoryIndex + 1);
     const newState: HistoryState = { content, title, selection, timestamp: now };
     newStack.push(newState);
@@ -243,7 +233,6 @@ export default function WritePage() {
       newStack = newStack.slice(1);
       setCurrentHistoryIndex(prev => prev - 1);
     }
-
     setHistoryStack(newStack);
     setCurrentHistoryIndex(newStack.length - 1);
     setLastHistoryTimestamp(now);
@@ -295,7 +284,7 @@ export default function WritePage() {
     setWordCount(words);
   };
 
-  // --- Local storage & Supabase (unchanged) ---
+  // --- Local storage & Supabase ---
   const getLocalDrafts = (): FullDraft[] => {
     const stored = localStorage.getItem('localDrafts');
     return stored ? JSON.parse(stored) : [];
@@ -317,7 +306,6 @@ export default function WritePage() {
       showToast('Saved locally. Log in to sync.', 'info');
       return id;
     }
-
     const now = new Date().toISOString();
     const trimmedContent = content.trim();
     if (currentDraftId) {
@@ -347,17 +335,14 @@ export default function WritePage() {
     setIsApplyingHistory(true);
     setCurrentDraftId(id);
     currentSelectionRangeRef.current = null;
-
     const userId = await getCurrentUserId();
     let data: FullDraft | undefined = undefined;
-
     if (userId) {
       const { data: dbData, error } = await supabase
         .from('drafts')
         .select('*')
         .eq('id', id)
         .maybeSingle();
-
       if (error || !dbData) {
         showToast('Failed to load draft', 'error');
         setIsApplyingHistory(false);
@@ -378,7 +363,6 @@ export default function WritePage() {
         return;
       }
     }
-
     if (canvasRef.current) canvasRef.current.textContent = data.content || '';
     if (titleRef.current) titleRef.current.value = data.title;
     setIsDirty(false);
@@ -417,15 +401,13 @@ export default function WritePage() {
     );
   };
 
-  // --- Save logic (unchanged) ---
+  // --- Save logic ---
   const manuallySave = async () => {
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
     if (!canvas || !titleEl) return;
-
     const content = canvas.textContent || '';
     const title = titleEl.value || 'Untitled Draft';
-
     if (!currentDraftId) {
       try {
         const id = await saveDraftToSupabase(content, title);
@@ -463,17 +445,14 @@ export default function WritePage() {
     const canvas = canvasRef.current;
     const titleEl = titleRef.current;
     if (!canvas || !titleEl) return;
-
     const content = canvas.textContent || '';
     const title = titleEl.value || 'Untitled Draft';
-
     const userId = await getCurrentUserId();
     if (!userId) {
       saveToLocalDrafts({ id: currentDraftId, title, content, updated_at: new Date().toISOString() });
       updateAutosaveStatus('Saved locally', 'saved');
       return;
     }
-
     updateAutosaveStatus('Saving…', 'saving');
     try {
       await saveDraftToSupabase(content, title);
@@ -490,12 +469,9 @@ export default function WritePage() {
   const handleInput = () => {
     setIsDirty(true);
     updateWordCount();
-
-    // Clear selection ref on edit (optional)
     lastValidSelectionTextRef.current = null;
     setHasActiveSelection(false);
     currentSelectionRangeRef.current = null;
-
     if (currentDraftId) {
       updateAutosaveStatus('Unsaved changes', 'unsaved');
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -508,7 +484,7 @@ export default function WritePage() {
     }
   };
 
-  // --- Keyboard shortcuts (unchanged) ---
+  // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -524,7 +500,6 @@ export default function WritePage() {
         redo();
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDirty, currentDraftId]);
@@ -534,19 +509,16 @@ export default function WritePage() {
     const handleSelectionChange = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-
       const selection = window.getSelection();
       if (!selection || selection.rangeCount === 0) {
         setHasActiveSelection(false);
         return;
       }
-
       const range = selection.getRangeAt(0);
       if (!canvas.contains(range.commonAncestorContainer)) {
         setHasActiveSelection(false);
         return;
       }
-
       const text = selection.toString().trim();
       if (text) {
         lastValidSelectionTextRef.current = text;
@@ -556,14 +528,13 @@ export default function WritePage() {
         setHasActiveSelection(false);
       }
     };
-
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
     };
   }, []);
 
-  // --- AI Functions (mostly unchanged) ---
+  // --- AI Functions ---
   const callAiApi = async (body: any): Promise<any> => {
     const res = await fetch('/api/edit', {
       method: 'POST',
@@ -587,7 +558,6 @@ export default function WritePage() {
       variationPickerRef.current.remove();
       variationPickerRef.current = null;
     }
-
     const modal = document.createElement('div');
     variationPickerRef.current = modal;
     modal.id = 'variation-picker-modal';
@@ -601,7 +571,6 @@ export default function WritePage() {
       padding-top: 80px;
       z-index: 10000;
     `;
-
     const picker = document.createElement('div');
     picker.style.cssText = `
       background: white;
@@ -616,7 +585,6 @@ export default function WritePage() {
       font-size: 1.05em;
       line-height: 1.6;
     `;
-
     picker.innerHTML = `
       <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
         <strong>Choose the best version</strong>
@@ -626,7 +594,6 @@ export default function WritePage() {
       <div style="background:#f9f9f9; padding:12px; border-radius:6px; margin-bottom:20px; font-style:italic;">${escapeHtml(originalText)}</div>
       <div id="variations-list"></div>
     `;
-
     const list = picker.querySelector('#variations-list')!;
     variations
       .map(t => t.trim())
@@ -652,17 +619,14 @@ export default function WritePage() {
         item.addEventListener('mouseleave', () => item.style.background = '');
         list.appendChild(item);
       });
-
     if (list.children.length === 0) {
       list.innerHTML = '<div style="color:#888;">No valid variations received.</div>';
     }
-
     picker.querySelector('#picker-cancel')!.addEventListener('click', () => {
       modal.remove();
       variationPickerRef.current = null;
       onCancel();
     });
-
     modal.appendChild(picker);
     document.body.appendChild(modal);
   };
@@ -685,142 +649,12 @@ export default function WritePage() {
     canvas.textContent = chosen;
   };
 
- const handleGenerateSpark = async () => {
-  if (!canvasRef.current || !titleRef.current) return;
-
-  captureHistoryState();
-  setIsAiOperation(true);
-  const title = titleRef.current.value.trim() || 'Untitled';
-  const fullContent = canvasRef.current.textContent?.trim() || '';
-  const isEmpty = !fullContent;
-
-  let context = '';
-  if (!isEmpty) {
-    const cutoff = fullContent.length > 250 ? fullContent.length - 250 : 0;
-    context = fullContent.slice(cutoff).trim();
-    const lastSentenceEnd = Math.max(
-      context.lastIndexOf('. '),
-      context.lastIndexOf('! '),
-      context.lastIndexOf('? ')
-    );
-    if (lastSentenceEnd > 100) {
-      context = context.slice(lastSentenceEnd + 1).trim();
-    }
-  }
-
-  let prompt = '';
-  if (isEmpty) {
-    prompt = `Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`;
-  } else {
-    prompt = `Continue the following narrative with exactly one new sentence that adds depth, emotion, or forward momentum. Do NOT repeat that Magnus won or that it was a match — assume the reader already knows that. Instead, describe the aftermath, a reaction, a strategic detail, or what comes next. Text: "${context}"`;
-  }
-
-  try {
-    updateAutosaveStatus('✨ Generating sparks...', 'saving');
-    const data = await callAiApi({
-      instruction: prompt,
-      model: 'x-ai/grok-4.1-fast:free',
-      editLevel: 'generate',
-      numVariations: 3,
-    });
-
-    // ✅ Extract & clean ALL variations — no matter what format they're in
-    const extractCleanSentence = (text: string): string => {
-      if (!text) return '';
-      // Handle JSON
-      if (text.startsWith('{') && text.endsWith('}')) {
-        try {
-          const parsed = JSON.parse(text);
-          if (parsed.excerpt) text = parsed.excerpt;
-          else if (parsed.content) text = parsed.content;
-          else if (parsed.generatedPost) text = parsed.generatedPost;
-        } catch {}
-      }
-      // Get first sentence
-      const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
-      let sentence = firstSentenceMatch
-        ? firstSentenceMatch[0]
-        : (text.split('\n')[0] || 'A new beginning.').trim();
-      if (!sentence.endsWith('.') && !sentence.endsWith('!') && !sentence.endsWith('?')) sentence += '.';
-      return sentence;
-    };
-
-    let variations: string[] = [];
-
-    if (Array.isArray(data.variations)) {
-      variations = data.variations.map(extractCleanSentence);
-    } else {
-      // Fallback: 3 separate requests
-      for (let i = 0; i < 3; i++) {
-        const variationPrompt = `${prompt} ${i === 0 ? '' : `(variation ${i + 1})`}`;
-        const res = await callAiApi({
-          instruction: variationPrompt,
-          model: 'x-ai/grok-4.1-fast:free',
-          editLevel: 'generate',
-        });
-        const text = res.generatedPost || res.editedText || '';
-        variations.push(extractCleanSentence(text));
-      }
-    }
-
-    // ✅ FINAL GUARANTEE: Clean every variation one last time
-    const cleanedVariations = variations
-      .map(extractCleanSentence)
-      .filter(Boolean);
-
-    // Show picker
-    showVariationPicker(
-      isEmpty ? `Starting point for "${title}"` : `Continuing from: "${context}"`,
-      cleanedVariations,
-      (chosen) => {
-        setIsApplyingHistory(true);
-        if (isEmpty) {
-          canvasRef.current!.textContent = chosen + ' ';
-        } else {
-          const selection = window.getSelection();
-          if (selection && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            range.collapse(false);
-            range.insertNode(document.createTextNode(' ' + chosen + ' '));
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          } else {
-            canvasRef.current!.textContent += ' ' + chosen + ' ';
-          }
-        }
-        setIsApplyingHistory(false);
-        captureHistoryState();
-        setIsDirty(true);
-        updateWordCount();
-        updateAutosaveStatus('Spark inserted!', 'saved');
-        showToast('✨ One-sentence spark added!', 'success');
-      },
-      () => {
-        updateAutosaveStatus('Spark canceled', 'info');
-      }
-    );
-
-  } catch (err) {
-    console.error('Spark failed:', err);
-    showToast('AI spark failed – try again', 'error');
-    updateAutosaveStatus('Spark failed', 'error');
-  } finally {
-    setIsAiOperation(false);
-    currentSelectionRangeRef.current = null;
-    lastValidSelectionTextRef.current = null;
-    setHasActiveSelection(false);
-  }
-};
-
+  // --- Rewrite ---
   const handleRewriteSelection = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
-    // 🔥 Use the ref, not state
     const text = lastValidSelectionTextRef.current || canvas.textContent.trim();
     const hasSelection = !!lastValidSelectionTextRef.current;
-
     if (!text) {
       showToast('No text to rewrite', 'info');
       return;
@@ -829,10 +663,8 @@ export default function WritePage() {
       showToast('Please select ≤50 words for best results', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('🧠 Generating rewrites...', 'saving');
       const data = await callAiApi({
@@ -842,13 +674,10 @@ export default function WritePage() {
         editLevel: 'rewrite',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       if (!variations.length) throw new Error('No output');
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -857,7 +686,6 @@ export default function WritePage() {
           applyChosenText(chosen, hasSelection, canvas);
           setIsApplyingHistory(false);
           captureHistoryState();
-          
           setIsDirty(true);
           updateWordCount();
           updateAutosaveStatus('Rewritten!', 'saved');
@@ -878,17 +706,15 @@ export default function WritePage() {
     }
   };
 
+  // --- Tone ---
   const handleAdjustTone = async () => {
-    // 🔥 Use the ref — no more "select text" false negatives!
     const text = lastValidSelectionTextRef.current;
     if (!text) {
       showToast('Select text to adjust tone', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('🎭 Generating tones...', 'saving');
       const data = await callAiApi({
@@ -898,11 +724,9 @@ export default function WritePage() {
         editLevel: 'tone',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -931,6 +755,7 @@ export default function WritePage() {
     }
   };
 
+  // --- Expand ---
   const handleExpandText = async () => {
     const text = lastValidSelectionTextRef.current;
     if (!text) {
@@ -941,10 +766,8 @@ export default function WritePage() {
       showToast('Select ≤50 words to expand', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('📈 Generating expansions...', 'saving');
       const data = await callAiApi({
@@ -954,11 +777,9 @@ export default function WritePage() {
         editLevel: 'expand',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -987,6 +808,7 @@ export default function WritePage() {
     }
   };
 
+  // --- Condense ---
   const handleCondenseText = async () => {
     const text = lastValidSelectionTextRef.current;
     if (!text) {
@@ -997,10 +819,8 @@ export default function WritePage() {
       showToast('Text is too short to condense effectively', 'info');
       return;
     }
-
     captureHistoryState();
     setIsAiOperation(true);
-
     try {
       updateAutosaveStatus('📉 Generating condensed versions...', 'saving');
       const data = await callAiApi({
@@ -1010,11 +830,9 @@ export default function WritePage() {
         editLevel: 'condense',
         numVariations: 3,
       });
-
       const variations = Array.isArray(data.variations)
         ? data.variations
         : [data.editedText || data.generatedPost].filter(Boolean);
-
       showVariationPicker(text, variations, (chosen) => {
         if (canvasRef.current) {
           const canvas = canvasRef.current;
@@ -1116,11 +934,10 @@ export default function WritePage() {
             <button className="mobile-drafts-toggle" onClick={() => setSidebarOpen(true)}>
               Drafts
             </button>
+
+            {/* AI Controls (no Spark) */}
             <div className="ai-controls-group">
               <div className="ai-controls-top">
-                <button className="btn ai-btn" onClick={handleGenerateSpark}>
-                  ✨ Spark
-                </button>
                 <button className="btn ai-btn" onClick={handleRewriteSelection}>
                   🧠 Rewrite
                 </button>
@@ -1137,6 +954,7 @@ export default function WritePage() {
                 </button>
               </div>
             </div>
+
             <div className="header-actions">
               <div className="history-controls">
                 <button className="btn history-btn" onClick={undo} title="Undo (Ctrl+Z)">
@@ -1169,15 +987,16 @@ export default function WritePage() {
               </button>
             </div>
           </div>
+
           <div
             ref={canvasRef}
             contentEditable
             className="writing-canvas"
             data-placeholder="Start writing your masterpiece…"
             onInput={handleInput}
-            // We no longer need onSelect, onMouseUp, etc. for AI logic
           >
           </div>
+
           <div className="writing-footer">
             <span>{wordCount} words</span>
           </div>

@@ -639,6 +639,7 @@ export default function WritePage() {
           border-radius: 6px;
           margin-bottom: 10px;
           cursor: pointer;
+          color: #000;
           transition: background 0.2s;
         `;
         item.textContent = text;
@@ -796,6 +797,7 @@ export default function WritePage() {
           applyChosenText(chosen, hasSelection, canvas);
           setIsApplyingHistory(false);
           captureHistoryState();
+          
           setIsDirty(true);
           updateWordCount();
           updateAutosaveStatus('Rewritten!', 'saved');

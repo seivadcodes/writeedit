@@ -145,7 +145,7 @@ export default function EchoesOfEarthPage() {
       {/* Ambient Header — subtle branding only */}
       <header className="fixed top-0 w-full p-6 z-10">
         <div className="max-w-4xl mx-auto flex justify-between items-center">
-          <div className="text-sm tracking-widest opacity-70">ECH OES · OF · EARTH</div>
+          <div className="text-sm tracking-widest opacity-70">ECHOES · OF · EARTH</div>
           {userId && (
             <button
               onClick={() => setAdminMode(!adminMode)}

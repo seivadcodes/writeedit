@@ -716,7 +716,7 @@ export default function WritePage() {
     prompt = `You are a master storyteller. Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`;
   } else {
     // ✅ Now include actual prior content as context
-    prompt = `You are a master storyteller. Continue the following narrative in a natural, flowing way. Maintain the tone, style, and direction. Title: "${title}". Previous text:\n\n"${context}"\n\nWrite ONLY ONE sentence that follows seamlessly. DO NOT summarize, conclude, or add commentary. DO NOT use quotes, markdown, or JSON. Return ONLY the sentence, ending with a period.`;
+    prompt = `Continue the following narrative with exactly one new sentence that adds depth, emotion, or forward momentum. Do NOT repeat that Magnus won or that it was a match — assume the reader already knows that. Instead, describe the aftermath, a reaction, a strategic detail, or what comes next. Text: "${context}"`;
   }
 
   try {

@@ -1,12 +1,18 @@
-// app/editor/page.tsx — The Magical Landing Page (Refreshed ✨)
+// app/editor/page.tsx — The Magical Landing Page (Polished)
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageWithChrome } from '@/components/PageWithChrome';
 
 export default function EditorLanding() {
-  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
+  const [activeCard, setActiveCard] = useState<string | null>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
+  // Detect touch support for better mobile UX
+  useEffect(() => {
+    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
 
   const tools = [
     {
@@ -53,85 +59,88 @@ export default function EditorLanding() {
 
   return (
     <PageWithChrome>
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-12 px-4">
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-10 px-4">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          <div className="text-center mb-14">
+            <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4 tracking-tight">
               Before Publishing
             </h1>
-            <p className="text-gray-600 max-w-2xl mx-auto text-lg">
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
               Polish your work with these writing and editing tools — before it goes live.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {tools.map((tool) => (
               <div
                 key={tool.id}
-                onMouseEnter={() => setHoveredCard(tool.id)}
-                onMouseLeave={() => setHoveredCard(null)}
-                className={`
-                  group relative p-7 rounded-2xl border-2 border-blue-500
-                  transition-all duration-300 ease-out cursor-pointer
-                  bg-white
-                  ${tool.comingSoon ? 'opacity-90' : ''}
-                  ${
-                    hoveredCard === tool.id
-                      ? 'bg-pink-50 shadow-lg shadow-blue-100'
-                      : 'hover:bg-pink-25 hover:shadow-md'
-                  }
+                className={`group relative p-6 rounded-2xl border-2 transition-all duration-300 cursor-pointer overflow-hidden shadow-sm
+                  ${tool.comingSoon ? 'border-gray-300 bg-gray-50' : 'border-blue-400 bg-white'}
+                  ${activeCard === tool.id ? 'bg-rose-50 shadow-md' : ''}
+                  ${!tool.comingSoon && !isTouchDevice ? 'hover:bg-rose-25 hover:shadow-md' : ''}
                 `}
                 onClick={() => {
                   if (!tool.comingSoon) {
-                    window.location.href = tool.link;
+                    setActiveCard(tool.id);
+                    setTimeout(() => {
+                      window.location.href = tool.link;
+                    }, 150); // slight delay for visual feedback
                   }
                 }}
-                style={{ backgroundColor: hoveredCard === tool.id ? '#fdf2f8' : '#ffffff' }}
+                // For keyboard navigation
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!tool.comingSoon) {
+                      setActiveCard(tool.id);
+                      setTimeout(() => {
+                        window.location.href = tool.link;
+                      }, 150);
+                    }
+                  }
+                }}
+                tabIndex={tool.comingSoon ? -1 : 0}
+                role="button"
+                aria-disabled={tool.comingSoon}
               >
-                {/* Coming Soon Badge */}
+                {/* Coming Soon Badge — Top Right */}
                 {tool.comingSoon && (
                   <div className="absolute top-4 right-4 z-10">
-                    <span className="bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">
+                    <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
                       Coming Soon
                     </span>
                   </div>
                 )}
 
-                {/* Icon + Title */}
-                <div className="flex items-center gap-4 mb-4">
-                  <span className="text-3xl drop-shadow-sm">{tool.emoji}</span>
+                {/* Emoji + Title */}
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-2xl">{tool.emoji}</span>
                   <h2 className="text-xl font-bold text-gray-900">{tool.title}</h2>
                 </div>
 
                 {/* Description */}
-                <p className="text-gray-700 leading-relaxed text-sm pr-2">
-                  {tool.description}
-                </p>
+                <p className="text-gray-600 text-sm leading-relaxed">{tool.description}</p>
 
-                {/* Animated arrow (only for active tools) */}
+                {/* Go-to indicator (only for available tools) */}
                 {!tool.comingSoon && (
                   <div className="mt-5 flex justify-end">
-                    <span className="flex items-center text-sm font-semibold text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                      Go to {tool.title}
-                      <svg
-                        className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-1"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M14 5l7 7m0 0l-7 7m7-7H3"
-                        ></path>
-                      </svg>
+                    <span className={`text-sm font-semibold text-blue-600 transition-all duration-200
+                      ${activeCard === tool.id 
+                        ? 'opacity-100 translate-x-0' 
+                        : isTouchDevice 
+                          ? 'opacity-0' 
+                          : 'opacity-0 group-hover:opacity-100 translate-x-1'}
+                    `}>
+                      → Go to {tool.title}
                     </span>
                   </div>
                 )}
               </div>
             ))}
+          </div>
+
+          <div className="text-center mt-12 text-gray-500 text-sm">
+            More tools coming soon. Ready to refine your voice before you publish?
           </div>
         </div>
       </div>

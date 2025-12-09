@@ -694,7 +694,6 @@ export default function WritePage() {
   const fullContent = canvasRef.current.textContent?.trim() || '';
   const isEmpty = !fullContent;
 
-  // ✅ Extract last ~250 characters for context
   let context = '';
   if (!isEmpty) {
     const cutoff = fullContent.length > 250 ? fullContent.length - 250 : 0;
@@ -722,13 +721,13 @@ export default function WritePage() {
       instruction: prompt,
       model: 'x-ai/grok-4.1-fast:free',
       editLevel: 'generate',
-      numVariations: 3, // ← Add this!
+      numVariations: 3,
     });
 
-    // ✅ Extract sentences from ANY format (JSON, plain text, etc.)
-    const extractSentence = (text: string): string => {
+    // ✅ Extract & clean ALL variations — no matter what format they're in
+    const extractCleanSentence = (text: string): string => {
       if (!text) return '';
-      // If it looks like JSON, try to parse and get excerpt
+      // Handle JSON
       if (text.startsWith('{') && text.endsWith('}')) {
         try {
           const parsed = JSON.parse(text);
@@ -746,29 +745,33 @@ export default function WritePage() {
       return sentence;
     };
 
-    // Generate 3 variations
-    const variations: string[] = [];
+    let variations: string[] = [];
+
     if (Array.isArray(data.variations)) {
-      variations.push(...data.variations.map(extractSentence));
+      variations = data.variations.map(extractCleanSentence);
     } else {
-      // Fallback: generate 3 slightly different prompts
-      const basePrompt = prompt;
+      // Fallback: 3 separate requests
       for (let i = 0; i < 3; i++) {
-        const variationPrompt = `${basePrompt} ${i === 0 ? '' : ` (variation ${i + 1})`}`;
+        const variationPrompt = `${prompt} ${i === 0 ? '' : `(variation ${i + 1})`}`;
         const res = await callAiApi({
           instruction: variationPrompt,
           model: 'x-ai/grok-4.1-fast:free',
           editLevel: 'generate',
         });
         const text = res.generatedPost || res.editedText || '';
-        variations.push(extractSentence(text));
+        variations.push(extractCleanSentence(text));
       }
     }
 
-    // Show picker with 3 options
+    // ✅ FINAL GUARANTEE: Clean every variation one last time
+    const cleanedVariations = variations
+      .map(extractCleanSentence)
+      .filter(Boolean);
+
+    // Show picker
     showVariationPicker(
       isEmpty ? `Starting point for "${title}"` : `Continuing from: "${context}"`,
-      variations.filter(Boolean),
+      cleanedVariations,
       (chosen) => {
         setIsApplyingHistory(true);
         if (isEmpty) {

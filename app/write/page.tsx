@@ -694,78 +694,110 @@ export default function WritePage() {
   const fullContent = canvasRef.current.textContent?.trim() || '';
   const isEmpty = !fullContent;
 
-  // ✅ Extract last ~250 characters (or last 2-3 sentences) for context
+  // ✅ Extract last ~250 characters for context
   let context = '';
   if (!isEmpty) {
-    // Get last 250 chars, but try to avoid cutting mid-sentence
     const cutoff = fullContent.length > 250 ? fullContent.length - 250 : 0;
     context = fullContent.slice(cutoff).trim();
-    // Optional: extend slightly to end at a sentence boundary
     const lastSentenceEnd = Math.max(
       context.lastIndexOf('. '),
       context.lastIndexOf('! '),
       context.lastIndexOf('? ')
     );
     if (lastSentenceEnd > 100) {
-      context = context.slice(lastSentenceEnd + 1).trim(); // keep recent complete sentences
+      context = context.slice(lastSentenceEnd + 1).trim();
     }
   }
 
   let prompt = '';
   if (isEmpty) {
-    prompt = `You are a master storyteller. Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`;
+    prompt = `Write ONLY ONE vivid, engaging, grammatically correct sentence to start a piece titled "${title}". DO NOT use quotation marks, markdown, bullet points, or any formatting. DO NOT include titles, subtitles, or JSON. Return ONLY the sentence itself, ending with a period.`;
   } else {
-    // ✅ Now include actual prior content as context
     prompt = `Continue the following narrative with exactly one new sentence that adds depth, emotion, or forward momentum. Do NOT repeat that Magnus won or that it was a match — assume the reader already knows that. Instead, describe the aftermath, a reaction, a strategic detail, or what comes next. Text: "${context}"`;
   }
 
   try {
-    updateAutosaveStatus('✨ Generating spark...', 'saving');
+    updateAutosaveStatus('✨ Generating sparks...', 'saving');
     const data = await callAiApi({
       instruction: prompt,
       model: 'x-ai/grok-4.1-fast:free',
       editLevel: 'generate',
+      numVariations: 3, // ← Add this!
     });
 
-    let text = data.generatedPost?.content || data.generatedPost || data.editedText || '';
+    // ✅ Extract sentences from ANY format (JSON, plain text, etc.)
+    const extractSentence = (text: string): string => {
+      if (!text) return '';
+      // If it looks like JSON, try to parse and get excerpt
+      if (text.startsWith('{') && text.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed.excerpt) text = parsed.excerpt;
+          else if (parsed.content) text = parsed.content;
+          else if (parsed.generatedPost) text = parsed.generatedPost;
+        } catch {}
+      }
+      // Get first sentence
+      const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
+      let sentence = firstSentenceMatch
+        ? firstSentenceMatch[0]
+        : (text.split('\n')[0] || 'A new beginning.').trim();
+      if (!sentence.endsWith('.') && !sentence.endsWith('!') && !sentence.endsWith('?')) sentence += '.';
+      return sentence;
+    };
 
-    if (text.startsWith('{') && text.endsWith('}')) {
-      try {
-        const parsed = JSON.parse(text);
-        text = parsed.excerpt || parsed.content || parsed.generatedPost || '';
-      } catch {}
-    }
-
-    const firstSentenceMatch = text.trim().match(/^[^.!?]*[.!?]/);
-    let sentence = firstSentenceMatch
-      ? firstSentenceMatch[0]
-      : (text.split('\n')[0] || 'A new beginning.').trim();
-    if (!sentence.endsWith('.') && !sentence.endsWith('!') && !sentence.endsWith('?')) sentence += '.';
-
-    setIsApplyingHistory(true);
-    if (isEmpty) {
-      canvasRef.current.textContent = sentence + ' ';
+    // Generate 3 variations
+    const variations: string[] = [];
+    if (Array.isArray(data.variations)) {
+      variations.push(...data.variations.map(extractSentence));
     } else {
-      // Insert at cursor or end
-      const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        range.collapse(false);
-        range.insertNode(document.createTextNode(' ' + sentence + ' '));
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } else {
-        // Append at end
-        canvasRef.current.textContent += ' ' + sentence + ' ';
+      // Fallback: generate 3 slightly different prompts
+      const basePrompt = prompt;
+      for (let i = 0; i < 3; i++) {
+        const variationPrompt = `${basePrompt} ${i === 0 ? '' : ` (variation ${i + 1})`}`;
+        const res = await callAiApi({
+          instruction: variationPrompt,
+          model: 'x-ai/grok-4.1-fast:free',
+          editLevel: 'generate',
+        });
+        const text = res.generatedPost || res.editedText || '';
+        variations.push(extractSentence(text));
       }
     }
-    setIsApplyingHistory(false);
-    captureHistoryState();
-    setIsDirty(true);
-    updateWordCount();
-    updateAutosaveStatus('Spark inserted!', 'saved');
-    showToast('✨ One-sentence spark added!', 'success');
+
+    // Show picker with 3 options
+    showVariationPicker(
+      isEmpty ? `Starting point for "${title}"` : `Continuing from: "${context}"`,
+      variations.filter(Boolean),
+      (chosen) => {
+        setIsApplyingHistory(true);
+        if (isEmpty) {
+          canvasRef.current!.textContent = chosen + ' ';
+        } else {
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.collapse(false);
+            range.insertNode(document.createTextNode(' ' + chosen + ' '));
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          } else {
+            canvasRef.current!.textContent += ' ' + chosen + ' ';
+          }
+        }
+        setIsApplyingHistory(false);
+        captureHistoryState();
+        setIsDirty(true);
+        updateWordCount();
+        updateAutosaveStatus('Spark inserted!', 'saved');
+        showToast('✨ One-sentence spark added!', 'success');
+      },
+      () => {
+        updateAutosaveStatus('Spark canceled', 'info');
+      }
+    );
+
   } catch (err) {
     console.error('Spark failed:', err);
     showToast('AI spark failed – try again', 'error');

@@ -14,7 +14,7 @@ export default function EditorLanding() {
       title: 'AI Editor',
       emoji: '✨',
       description: 'Polish your book with AI — proofread, rewrite, or formalize.',
-      link: '/editor/ai',
+      link: '/editor/',
       comingSoon: false,
     },
     {
@@ -46,7 +46,7 @@ export default function EditorLanding() {
       title: 'Image Analysis',
       emoji: '👁️',
       description: 'Upload images to extract text, analyze content, or generate ideas.',
-      link: '/image-analysis',
+      link: '/images',
       comingSoon: false,
     },
     {

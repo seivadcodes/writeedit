@@ -3,22 +3,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { splitIntoChunks } from '@/lib/chunking';
 import { getSystemPrompt } from '@/lib/ai';
 
-// --- NEW: Import Job Queue System ---
-// You will need to set up a simple job queue. For simplicity, we'll use an in-memory array.
-// In production, use Redis, BullMQ, or a managed service like Upstash Queue.
-const jobQueue: {
-  id: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed';
-  result?: {
-    editedText: string;
-    variations: string[];
-    trackedHtml: string;
-    changes: number;
-    usedModel: string;
-    variationCount: number;
-  };
-  error?: string;
-}[] = [];
+const ALLOWED_MODELS = [
+  'x-ai/grok-4.1-fast:free',
+  'alibaba/tongyi-deepresearch-30b-a3b:free',
+  'kwaipilot/kat-coder-pro:free',
+  'anthropic/claude-3.5-sonnet:free',
+  'google/gemini-flash-1.5-8b:free'
+];
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,13 +20,18 @@ export async function POST(req: NextRequest) {
       model: preferredModel,
       editLevel,
       useEditorialBoard = false,
-      numVariations = 1
+      numVariations = 1 // 🔥 Read this from request
     } = body;
 
-    // Validate inputs (same as before)
+    // Clamp numVariations between 1 and 3 (to control cost/latency)
+    const variationCount = Math.min(3, Math.max(1, Math.floor(numVariations)));
+
+    // Instruction is always required
     if (!instruction?.trim()) {
       return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
     }
+
+    // Input is only required for editing (not for generation like "Spark")
     if (editLevel !== 'generate' && !input?.trim()) {
       return NextResponse.json({ error: 'Input required' }, { status: 400 });
     }
@@ -45,116 +41,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Server config error' }, { status: 500 });
     }
 
-    // Generate a unique job ID
-    const jobId = crypto.randomUUID();
-
-    // Enqueue the job
-    jobQueue.push({
-      id: jobId,
-      status: 'queued',
-    });
-
-    // Start processing in the background
-    processJob(jobId, {
-      input,
-      instruction,
+    // Build fallback order: preferred first, then others
+    const modelOrder = [
       preferredModel,
-      editLevel,
-      useEditorialBoard,
-      numVariations,
-      OPENROUTER_API_KEY
-    }).catch(err => {
-      console.error(`❌ Job ${jobId} failed:`, err);
-      const jobIndex = jobQueue.findIndex(j => j.id === jobId);
-      if (jobIndex !== -1) {
-        jobQueue[jobIndex].status = 'failed';
-        jobQueue[jobIndex].error = err instanceof Error ? err.message : String(err);
-      }
-    });
+      ...ALLOWED_MODELS.filter(m => m !== preferredModel)
+    ].filter(m => ALLOWED_MODELS.includes(m));
 
-    // Immediately respond with the job ID
-    return NextResponse.json({
-      jobId,
-      message: 'Processing started. Poll /api/edit/status?jobId=YOUR_JOB_ID to check status.'
-    });
+    let variationsResult: string[] | null = null;
+    let usedModel: string | null = null;
+    let lastError: unknown = null;
 
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error('❌ Edit API error:', errorMessage);
-    return NextResponse.json({ error: errorMessage || 'Internal error' }, { status: 500 });
-  }
-}
-
-// --- NEW: GET endpoint to check job status ---
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const jobId = searchParams.get('jobId');
-
-  if (!jobId) {
-    return NextResponse.json({ error: 'jobId parameter is required' }, { status: 400 });
-  }
-
-  const job = jobQueue.find(j => j.id === jobId);
-
-  if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-  }
-
-  return NextResponse.json(job);
-}
-
-// --- NEW: Background Job Processor ---
-async function processJob(
-  jobId: string,
-  params: {
-    input: string;
-    instruction: string;
-    preferredModel: string;
-    editLevel: string;
-    useEditorialBoard: boolean;
-    numVariations: number;
-    OPENROUTER_API_KEY: string;
-  }
-) {
-  const {
-    input,
-    instruction,
-    preferredModel,
-    editLevel,
-    useEditorialBoard,
-    numVariations,
-    OPENROUTER_API_KEY
-  } = params;
-
-  const ALLOWED_MODELS = [
-    'x-ai/grok-4.1-fast:free',
-    'alibaba/tongyi-deepresearch-30b-a3b:free',
-    'kwaipilot/kat-coder-pro:free',
-    'anthropic/claude-3.5-sonnet:free',
-    'google/gemini-flash-1.5-8b:free'
-  ];
-
-  const modelOrder = [
-    preferredModel,
-    ...ALLOWED_MODELS.filter(m => m !== preferredModel)
-  ].filter(m => ALLOWED_MODELS.includes(m));
-
-  let variationsResult: string[] | null = null;
-  let usedModel: string | null = null;
-  let lastError: unknown = null;
-
-  // Find the job in the queue and update its status
-  const jobIndex = jobQueue.findIndex(j => j.id === jobId);
-  if (jobIndex === -1) {
-    throw new Error('Job not found in queue');
-  }
-  jobQueue[jobIndex].status = 'processing';
-
-  try {
     for (const model of modelOrder) {
       try {
         const wordCount = input?.trim().split(/\s+/).length || 0;
         if (wordCount >= 1000) {
+          // For large docs, we don’t support variations (too expensive)
           const single = await processChunkedEditWithModel(
             input || '',
             instruction,
@@ -165,9 +66,11 @@ async function processJob(
           );
           variationsResult = [single];
         } else {
+          // 🔥 Generate multiple variations (unless chunked)
           const promises = [];
-          for (let i = 0; i < Math.min(3, Math.max(1, Math.floor(numVariations))); i++) {
-            const temperature = 0.7 + (i * 0.2);
+          for (let i = 0; i < variationCount; i++) {
+            // Slightly different temperature per variation for diversity
+            const temperature = 0.7 + (i * 0.2); // e.g., 0.7, 0.9, 1.1
             promises.push(
               callModelWithTemp(
                 input || '',
@@ -181,6 +84,7 @@ async function processJob(
             );
           }
           const results = await Promise.all(promises);
+          // Dedupe & filter empty
           const unique = [...new Set(results.map(r => r.trim()))].filter(Boolean);
           variationsResult = unique.length > 0 ? unique : [results[0]];
         }
@@ -194,32 +98,34 @@ async function processJob(
     }
 
     if (variationsResult === null) {
-      throw new Error('All models failed. Last error: ' + (lastError instanceof Error ? lastError.message : String(lastError)));
+      const fallbackError = lastError instanceof Error ? lastError.message : String(lastError);
+      return NextResponse.json(
+        { error: 'All models failed. Last error: ' + fallbackError },
+        { status: 500 }
+      );
     }
 
+    // For backward compatibility + UI
     const primary = variationsResult[0];
     const { html: trackedHtml, changes } = generateTrackedChanges(input || '', primary);
 
-    // Update the job with the result
-    jobQueue[jobIndex].status = 'completed';
-    jobQueue[jobIndex].result = {
+    return NextResponse.json({
       editedText: primary,
-      variations: variationsResult,
+      variations: variationsResult, // ✅ Now included!
       trackedHtml,
       changes,
-      usedModel: usedModel || 'unknown',
+      usedModel,
       variationCount: variationsResult.length
-    };
+    });
 
-  } catch (err) {
-    // Update the job with the error
-    jobQueue[jobIndex].status = 'failed';
-    jobQueue[jobIndex].error = err instanceof Error ? err.message : String(err);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('❌ Edit API error:', errorMessage);
+    return NextResponse.json({ error: errorMessage || 'Internal error' }, { status: 500 });
   }
 }
 
-// --- The rest of your functions remain unchanged ---
-
+// --- Updated: callModel now accepts temperature ---
 async function callModelWithTemp(
   text: string,
   instruction: string,
@@ -249,6 +155,7 @@ async function callModelWithTemp(
       ],
       max_tokens: 1000,
       temperature,
+      // Some models require this for non-determinism
       top_p: temperature > 0.8 ? 0.95 : 0.9
     })
   });
@@ -267,6 +174,7 @@ async function callModelWithTemp(
   return content;
 }
 
+// --- Updated self-refinement to accept temperature ---
 async function runSelfRefinementLoop(
   original: string,
   instruction: string,
@@ -282,6 +190,7 @@ async function runSelfRefinementLoop(
   return current;
 }
 
+// --- Chunked Processing (unchanged — returns single string) ---
 async function processChunkedEditWithModel(
   input: string,
   instruction: string,
@@ -306,6 +215,7 @@ async function processChunkedEditWithModel(
   return editedChunks.join('\n\n');
 }
 
+// --- DIFF GENERATION (unchanged) ---
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')

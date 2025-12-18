@@ -1,44 +1,21 @@
+// /components/EditorUI.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useEditor, EditLevel } from '@/hooks/useEditor';
 import { useDocument, SavedDocument } from '@/hooks/useDocument';
 import { TrackedChangesView } from '@/components/TrackedChangesView';
 
-// Chunking helper (matches backend limits)
-const MAX_CHUNK_WORDS = 800;
-const MAX_SINGLE_REQUEST_WORDS = 2000;
-
-function splitIntoChunks(text: string, maxWords = MAX_CHUNK_WORDS): string[] {
-  const words = text.trim().split(/\s+/);
-  const chunks: string[] = [];
-  let currentChunk: string[] = [];
-  let currentCount = 0;
-
-  for (const word of words) {
-    currentChunk.push(word);
-    currentCount++;
-    
-    if (currentCount >= maxWords) {
-      chunks.push(currentChunk.join(' '));
-      currentChunk = [];
-      currentCount = 0;
-    }
-  }
-
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk.join(' '));
-  }
-
-  return chunks;
-}
+// Performance-optimized chunk size (adjust based on model capabilities)
+const CHUNK_SIZE = 750; // words per chunk
+const MAX_CONCURRENT_CHUNKS = 4; // balance between speed and API limits
 
 export function EditorUI() {
   const editor = useEditor();
   const docManager = useDocument();
   const trackedRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const chunkProcessingRef = useRef(false); // Prevent duplicate processing
+  const processingChunksRef = useRef<AbortController[]>([]);
 
   const {
     documents,
@@ -64,23 +41,26 @@ export function EditorUI() {
     setEditLevel,
     setCustomInstruction,
     setViewMode,
-    applyEdit: originalApplyEdit,
+    applyEdit,
   } = editor;
 
   const [documentName, setDocumentName] = useState('');
   const [showDocuments, setShowDocuments] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [processingChunks, setProcessingChunks] = useState(false);
-  const [chunkProgress, setChunkProgress] = useState({ current: 0, total: 0 });
-  const [largeDocumentMode, setLargeDocumentMode] = useState(false);
-  const [chunkedResults, setChunkedResults] = useState<string[]>([]);
+  const [chunkProgress, setChunkProgress] = useState<{ processed: number; total: number; isProcessing: boolean }>({
+    processed: 0,
+    total: 0,
+    isProcessing: false
+  });
+  const [chunkResults, setChunkResults] = useState<string[]>([]);
+  const [isChunkedProcessing, setIsChunkedProcessing] = useState(false);
 
   // Auto-show document panel after first edit
   useEffect(() => {
-    if (editedText && !isLoading && !largeDocumentMode) {
+    if (editedText && !isLoading) {
       setShowDocuments(true);
     }
-  }, [editedText, isLoading, largeDocumentMode]);
+  }, [editedText, isLoading]);
 
   useEffect(() => {
     if (!documentName.trim() && inputText.trim()) {
@@ -89,8 +69,15 @@ export function EditorUI() {
     }
   }, [inputText]);
 
+  // Cleanup chunk processing on unmount
+  useEffect(() => {
+    return () => {
+      processingChunksRef.current.forEach(controller => controller.abort());
+    };
+  }, []);
+
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
-    if (!trackedRef.current) return editedText || '';
+    if (!trackedRef.current) return editedText;
 
     const clone = trackedRef.current.cloneNode(true) as HTMLElement;
     clone.querySelectorAll('.change-action, del').forEach(el => el.remove());
@@ -105,7 +92,7 @@ export function EditorUI() {
       group.remove();
     });
 
-    return clone.textContent?.trim() || editedText || '';
+    return clone.textContent?.trim() || editedText;
   }, [editedText]);
 
   const handleCopy = async () => {
@@ -132,6 +119,184 @@ export function EditorUI() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  // Ultra-fast text chunking algorithm
+  const chunkText = useCallback((text: string, chunkSize: number): string[] => {
+    const paragraphs = text.split(/\n{2,}/);
+    const chunks: string[] = [];
+    let currentChunk: string[] = [];
+    let currentWordCount = 0;
+
+    // First try to chunk by paragraphs
+    for (const para of paragraphs) {
+      const wordCount = para.trim().split(/\s+/).filter(w => w).length;
+      
+      if (currentWordCount + wordCount > chunkSize && currentChunk.length > 0) {
+        chunks.push(currentChunk.join('\n\n'));
+        currentChunk = [];
+        currentWordCount = 0;
+      }
+      
+      if (wordCount > chunkSize * 2) {
+        // Handle extremely large paragraphs by splitting them
+        const sentences = para.split(/(?<=[.!?])\s+/);
+        let sentenceChunk = '';
+        let sentenceWordCount = 0;
+        
+        for (const sentence of sentences) {
+          const sWordCount = sentence.trim().split(/\s+/).filter(w => w).length;
+          
+          if (sentenceWordCount + sWordCount > chunkSize && sentenceChunk) {
+            chunks.push(sentenceChunk.trim());
+            sentenceChunk = sentence;
+            sentenceWordCount = sWordCount;
+          } else {
+            sentenceChunk = sentenceChunk ? `${sentenceChunk} ${sentence}` : sentence;
+            sentenceWordCount += sWordCount;
+          }
+        }
+        
+        if (sentenceChunk) {
+          chunks.push(sentenceChunk.trim());
+        }
+      } else {
+        currentChunk.push(para);
+        currentWordCount += wordCount;
+      }
+    }
+
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk.join('\n\n'));
+    }
+
+    return chunks;
+  }, []);
+
+  // Process large documents by chunking
+  const processLargeDocument = useCallback(async () => {
+    if (!inputText.trim()) return;
+    
+    const totalWords = inputText.trim().split(/\s+/).filter(w => w).length;
+    if (totalWords <= 2000) {
+      // Small enough for single request
+      applyEdit();
+      return;
+    }
+    
+    // Start chunked processing
+    setIsChunkedProcessing(true);
+    setChunkProgress({ processed: 0, total: 0, isProcessing: true });
+    setChunkResults([]);
+    
+    // Split text into chunks
+    const chunks = chunkText(inputText, CHUNK_SIZE);
+    setChunkProgress(prev => ({ ...prev, total: chunks.length }));
+    
+    // Reset abort controllers
+    processingChunksRef.current.forEach(controller => controller.abort());
+    processingChunksRef.current = [];
+    
+    // Process chunks with controlled concurrency
+    const results: string[] = new Array(chunks.length).fill('');
+    let nextChunkIndex = 0;
+    let activeRequests = 0;
+    let isAborted = false;
+    
+    const processNextChunk = async () => {
+      if (isAborted || nextChunkIndex >= chunks.length) return;
+      
+      const chunkIndex = nextChunkIndex++;
+      const controller = new AbortController();
+      processingChunksRef.current.push(controller);
+      
+      try {
+        activeRequests++;
+        setChunkProgress(prev => ({ ...prev, processed: prev.processed + 1 }));
+        
+        const response = await fetch('/api/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: chunks[chunkIndex],
+            instruction: editLevel === 'custom' ? customInstruction : editLevel,
+            model: 'mistralai/devstral-2512:free',
+            editLevel,
+            chunkIndex,
+            totalChunks: chunks.length
+          }),
+          signal: controller.signal
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        results[chunkIndex] = data.editedText || chunks[chunkIndex];
+      } catch (err) {
+        if (!(err instanceof Error) || !err.message.includes('Abort')) {
+          console.error(`Chunk ${chunkIndex} failed:`, err);
+          // Retry once on failure
+          try {
+            results[chunkIndex] = chunks[chunkIndex]; // fallback to original
+          } catch (retryErr) {
+            console.error(`Chunk ${chunkIndex} retry failed:`, retryErr);
+            results[chunkIndex] = chunks[chunkIndex]; // fallback to original
+          }
+        }
+      } finally {
+        activeRequests--;
+        
+        // If all chunks processed, combine results
+        if (activeRequests === 0 && nextChunkIndex >= chunks.length) {
+          if (!isAborted) {
+            // Combine results while preserving paragraph structure
+            const combined = results.filter(Boolean).join('\n\n');
+            editor.setEditedText(combined);
+            setIsChunkedProcessing(false);
+            setChunkProgress({ processed: chunks.length, total: chunks.length, isProcessing: false });
+            setShowDocuments(true);
+          }
+        }
+      }
+    };
+    
+    // Start initial batch of requests
+    const initialBatch = Math.min(MAX_CONCURRENT_CHUNKS, chunks.length);
+    for (let i = 0; i < initialBatch; i++) {
+      processNextChunk();
+    }
+    
+    // Process remaining chunks as slots become available
+    const interval = setInterval(() => {
+      if (isAborted) {
+        clearInterval(interval);
+        return;
+      }
+      
+      while (activeRequests < MAX_CONCURRENT_CHUNKS && nextChunkIndex < chunks.length) {
+        processNextChunk();
+      }
+      
+      if (activeRequests === 0 && nextChunkIndex >= chunks.length) {
+        clearInterval(interval);
+      }
+    }, 100);
+    
+    // Cleanup function
+    return () => {
+      isAborted = true;
+      clearInterval(interval);
+      processingChunksRef.current.forEach(controller => controller.abort());
+      processingChunksRef.current = [];
+    };
+  }, [inputText, editLevel, customInstruction, chunkText, applyEdit, editor]);
+
+  const enhancedApplyEdit = useCallback(async () => {
+  if (isLoading || isChunkedProcessing) return;
+  await processLargeDocument();
+}, [isLoading, isChunkedProcessing, processLargeDocument]);
 
   const handleAcceptChange = useCallback(() => {}, []);
   const handleRejectChange = useCallback(() => {}, []);
@@ -172,10 +337,6 @@ export function EditorUI() {
 
   const handleFileUpload = async (file: File) => {
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { // 10MB limit
-      alert('File too large. Maximum size is 10MB.');
-      return;
-    }
 
     if (fileInputRef.current) fileInputRef.current.value = '';
     setSelectedFile(file);
@@ -199,7 +360,7 @@ export function EditorUI() {
         });
         text = reader.result as string;
       } else {
-        alert('SupportedContent type. Please upload .docx or .doc files only.');
+        alert('Please upload .docx or .doc files only.');
         setSelectedFile(null);
         return;
       }
@@ -212,10 +373,6 @@ export function EditorUI() {
           .trim()
           .substring(0, 40) || 'New Document';
         setDocumentName(cleanName);
-        
-        // Auto-detect large document mode
-        const words = text.trim().split(/\s+/).length;
-        setLargeDocumentMode(words > MAX_SINGLE_REQUEST_WORDS);
       } else {
         alert('Could not extract readable text from the document.');
       }
@@ -230,105 +387,6 @@ export function EditorUI() {
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
-
-  // NEW: Chunked processing function
-  const processLargeDocument = async () => {
-    if (chunkProcessingRef.current) return;
-    chunkProcessingRef.current = true;
-    
-    setProcessingChunks(true);
-    setChunkedResults([]);
-    setChunkProgress({ current: 0, total: 0 });
-    
-    try {
-      const chunks = splitIntoChunks(inputText);
-      setChunkProgress({ current: 0, total: chunks.length });
-      
-      const results: string[] = [];
-      
-      for (let i = 0; i < chunks.length; i++) {
-        setChunkProgress(prev => ({ ...prev, current: i + 1 }));
-        
-       const response = await fetch('/api/edit', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    input: chunks[i],
-    instruction: editLevel === 'custom' ? customInstruction : editLevel,
-    // ❗ You must define/track selected model elsewhere
-    // For now, omit or use a default
-    model: 'mistralai/devstral-2512:free', // or get from a state like `selectedModel`
-    editLevel,
-    useEditorialBoard: editor.isEditorialBoard, // ✅ corrected name
-    numVariations: 1,
-    chunkIndex: i,
-    totalChunks: chunks.length
-  })
-});
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `Chunk ${i+1} failed`);
-        }
-
-        const data = await response.json();
-        results.push(data.editedText);
-      }
-      
-      // Combine results
-      const fullResult = results.join('\n\n');
-      setChunkedResults(results);
-      
-      // Only set final result after all chunks processed
-      editor.setEditedText(fullResult);
-    
-      // Show success message
-      alert(`✅ Successfully processed ${chunks.length} chunks!`);
-      
-    } catch (err) {
-      console.error('Chunk processing error:', err);
-      alert(`❌ Processing failed: ${(err as Error).message}`);
-    } finally {
-      setProcessingChunks(false);
-      chunkProcessingRef.current = false;
-    }
-  };
-
-  // Enhanced edit handler with chunking support
-  const applyEdit = async () => {
-    if (chunkProcessingRef.current) return;
-    
-    const words = inputText.trim().split(/\s+/).length;
-    
-    // Handle large documents
-    if (words > MAX_SINGLE_REQUEST_WORDS) {
-      if (confirm(`Your document has ${words} words. Processing will happen in ${Math.ceil(words / MAX_CHUNK_WORDS)} chunks. This may take several minutes. Continue?`)) {
-        await processLargeDocument();
-      }
-      return;
-    }
-    
-    // Handle normal documents
-    try {
-      await originalApplyEdit();
-      
-      // Auto-show documents panel after successful edit
-      if (!showDocuments) setShowDocuments(true);
-      
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('413')) {
-        // Backend requested chunking
-        setLargeDocumentMode(true);
-        alert('Document too large for single request. Switching to chunked processing mode.');
-      } else {
-        console.error('Edit failed:', err);
-        alert(`Edit failed: ${(err as Error).message}`);
-      }
-    }
-  };
-
-  // Disable tracked changes for large documents
-  const showTrackedChanges = !largeDocumentMode && viewMode === 'tracked';
 
   return (
     <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6 bg-white text-black min-h-screen">
@@ -380,38 +438,16 @@ export function EditorUI() {
               Processing {selectedFile.name}...
             </div>
           )}
-          
-          {/* Chunk processing status */}
-          {processingChunks && (
-            <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
-              Processing chunk {chunkProgress.current} of {chunkProgress.total}...
-              <div className="mt-1 h-2 bg-yellow-200 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-yellow-500 transition-all duration-300" 
-                  style={{ width: `${(chunkProgress.current / chunkProgress.total) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
         </div>
 
         <textarea
           value={inputText}
-          onChange={(e) => {
-            setInputText(e.target.value);
-            setLargeDocumentMode(e.target.value.trim().split(/\s+/).length > MAX_SINGLE_REQUEST_WORDS);
-          }}
+          onChange={(e) => setInputText(e.target.value)}
           placeholder="Paste your text here or upload a Word document above..."
           rows={8}
           className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          disabled={isLoading || processingChunks}
+          disabled={isLoading || isChunkedProcessing}
         />
-        
-        {largeDocumentMode && (
-          <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-            📌 Large document detected ({wordCount} words). Will be processed in chunks of {MAX_CHUNK_WORDS} words each. Tracked changes won't be available.
-          </div>
-        )}
       </div>
 
       {/* === 2. Editing Level === */}
@@ -427,7 +463,7 @@ export function EditorUI() {
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
               }`}
               onClick={() => setEditLevel(level)}
-              disabled={processingChunks}
+              disabled={isLoading || isChunkedProcessing}
             >
               {level.charAt(0).toUpperCase() + level.slice(1)}
             </button>
@@ -440,34 +476,46 @@ export function EditorUI() {
             onChange={(e) => setCustomInstruction(e.target.value)}
             placeholder="Enter custom instruction..."
             className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black bg-white"
-            disabled={processingChunks}
+            disabled={isLoading || isChunkedProcessing}
           />
         )}
       </div>
 
-      {/* === 3. ✨ Edit Button === */}
+      {/* === 3. ✨ Enhanced Edit Button with Chunk Processing === */}
       <div>
         <button
           id="edit-btn"
-          onClick={applyEdit}
-          disabled={isLoading || processingChunks || !inputText.trim()}
+          onClick={enhancedApplyEdit}
+          disabled={isLoading || isChunkedProcessing || !inputText.trim()}
           className={`px-4 py-2 rounded-md font-medium ${
-            isLoading || processingChunks
+            isLoading || isChunkedProcessing
               ? 'bg-gray-400 cursor-not-allowed'
               : inputText.trim()
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
         >
-          {processingChunks ? '🔄 Processing Chunks...' : isLoading ? '⏳ Processing...' : '✨ Edit'}
+          {isLoading ? '⏳ Processing...' : isChunkedProcessing ? `🚀 Processing (${chunkProgress.processed}/${chunkProgress.total})` : '✨ Edit'}
         </button>
+        
+        {isChunkedProcessing && (
+          <div className="mt-2">
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                style={{ width: `${(chunkProgress.processed / chunkProgress.total) * 100}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+        
         {(error || docError) && (
           <p className="mt-2 text-red-600 text-sm">{error || docError}</p>
         )}
       </div>
 
       {/* === 4. Edited Result === */}
-      {(editedText || isLoading || processingChunks) && (
+      {(editedText || isLoading || isChunkedProcessing) && (
         <div>
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold text-black">Edited Result</h2>
@@ -475,9 +523,9 @@ export function EditorUI() {
               <button
                 id="copy-btn"
                 onClick={handleCopy}
-                disabled={processingChunks}
+                disabled={isLoading || isChunkedProcessing}
                 className={`px-3 py-1 text-sm rounded ${
-                  processingChunks
+                  isLoading || isChunkedProcessing
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'bg-gray-200 hover:bg-gray-300'
                 }`}
@@ -487,9 +535,9 @@ export function EditorUI() {
               <button
                 id="download-btn"
                 onClick={handleDownload}
-                disabled={processingChunks}
+                disabled={isLoading || isChunkedProcessing}
                 className={`px-3 py-1 text-sm rounded ${
-                  processingChunks
+                  isLoading || isChunkedProcessing
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'bg-gray-200 hover:bg-gray-300'
                 }`}
@@ -507,22 +555,20 @@ export function EditorUI() {
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
               }`}
               onClick={() => setViewMode('clean')}
-              disabled={largeDocumentMode} // Disable toggle for large docs
+              disabled={isLoading || isChunkedProcessing}
             >
               Clean View
             </button>
             <button
               className={`px-3 py-1 text-sm ml-1 ${
-                showTrackedChanges
+                viewMode === 'tracked'
                   ? 'bg-blue-600 text-white'
-                  : largeDocumentMode
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
               }`}
-              onClick={() => !largeDocumentMode && setViewMode('tracked')}
-              title={largeDocumentMode ? "Tracked changes disabled for large documents" : ""}
+              onClick={() => setViewMode('tracked')}
+              disabled={isLoading || isChunkedProcessing}
             >
-              Tracked Changes {largeDocumentMode ? '(disabled)' : `(${changeCount} change${changeCount !== 1 ? 's' : ''})`}
+              Tracked Changes ({changeCount} change{changeCount !== 1 ? 's' : ''})
             </button>
           </div>
 
@@ -531,37 +577,28 @@ export function EditorUI() {
             className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm text-black"
             style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
           >
-            {processingChunks ? (
-              <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                <svg className="animate-spin h-8 w-8 mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <p>Processing document in chunks...</p>
-                <p className="text-sm mt-1">Chunk {chunkProgress.current} of {chunkProgress.total}</p>
-              </div>
-            ) : viewMode === 'clean' ? (
-              editedText || 'Result will appear here...'
+            {viewMode === 'clean' ? (
+              editedText || (isChunkedProcessing ? 'Processing large document in chunks...' : 'Result will appear here...')
             ) : (
-              <TrackedChangesView
-                key={documentId || 'new'}
-                originalText={inputText}
-                editedText={editedText}
-                onAcceptChange={handleAcceptChange}
-                onRejectChange={handleRejectChange}
-              />
+            <TrackedChangesView
+  key={documentId || 'new'}
+  originalText={inputText}
+  editedText={editedText}
+  onAcceptChange={handleAcceptChange}
+  onRejectChange={handleRejectChange}
+/>
             )}
           </div>
         </div>
       )}
 
-      {!editedText && !isLoading && !processingChunks && (
+      {!editedText && !isLoading && !isChunkedProcessing && (
         <div className="p-3 bg-gray-50 border rounded text-gray-500 text-sm">
           Result will appear here after you click "Edit".
         </div>
       )}
 
-      {/* === 5. Document Management === */}
+      {/* === 5. Document Management (auto-shows after edit) === */}
       <div className="border-t border-gray-300 pt-4">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold text-black">Document Management</h2>
@@ -582,13 +619,13 @@ export function EditorUI() {
               onChange={(e) => setDocumentName(e.target.value)}
               placeholder="Document name..."
               className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
-              disabled={processingChunks}
+              disabled={isLoading || isChunkedProcessing}
             />
             <div className="flex gap-2">
               <button
                 id="save-document-btn"
                 onClick={handleSaveDocument}
-                disabled={isLoading || isDocLoading || processingChunks || !editedText}
+                disabled={isLoading || isDocLoading || isChunkedProcessing || !editedText}
                 className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
               >
                 💾 Save Document
@@ -596,7 +633,7 @@ export function EditorUI() {
               <button
                 id="save-progress-btn"
                 onClick={handleSaveProgress}
-                disabled={!documentId || isLoading || isDocLoading || processingChunks || !editedText}
+                disabled={!documentId || isLoading || isDocLoading || isChunkedProcessing || !editedText}
                 className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
               >
                 🔄 Save Progress
@@ -620,7 +657,7 @@ export function EditorUI() {
                             ? 'border-green-500 bg-green-50'
                             : 'border-gray-300 hover:bg-gray-100'
                         }`}
-                        onClick={() => !processingChunks && handleDocumentClick(doc)}
+                        onClick={() => handleDocumentClick(doc)}
                       >
                         <div className="flex justify-between items-start">
                           <div className="font-medium text-sm text-black">{doc.name}</div>
@@ -630,20 +667,18 @@ export function EditorUI() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              !processingChunks && handleDocumentClick(doc);
+                              handleDocumentClick(doc);
                             }}
-                            className={`text-xs ${processingChunks ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600'}`}
-                            disabled={processingChunks}
+                            className="text-xs text-blue-600"
                           >
                             ↩️
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              !processingChunks && confirm('Delete this document?') && deleteDocument(doc.id);
+                              if (confirm('Delete this document?')) deleteDocument(doc.id);
                             }}
-                            className={`text-xs ${processingChunks ? 'text-gray-400 cursor-not-allowed' : 'text-red-600'}`}
-                            disabled={processingChunks}
+                            className="text-xs text-red-600"
                           >
                             ×
                           </button>

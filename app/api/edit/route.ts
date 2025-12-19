@@ -1,311 +1,265 @@
 // app/api/edit/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
+import { splitIntoChunks } from '@/lib/chunking';
+import { getSystemPrompt } from '@/lib/ai';
 
-// ================
-// TYPES
-// ================
-
-type TokenUsage = {
-  input: number;
-  output: number;
-  total: number;
-};
-
-type EditLog = {
-  round: number;
-  model: string;
-  duration: number;
-  tokens: TokenUsage;
-  success: boolean;
-  error?: string;
-  inputPreview: string;
-  outputPreview: string;
-};
-
-// ================
-// VALIDATION
-// ================
-
-const EditRequestSchema = z.object({
-  text: z.string().min(1, 'Text cannot be empty'),
-  level: z.enum(['proofread', 'rewrite', 'formal', 'custom']),
-  customInstruction: z.string().optional(),
-  model: z.string(),
-  useEditorialBoard: z.boolean().default(false),
-});
-
-// ================
-// MODEL CONFIGURATION
-// ================
-
-const MODEL_CONFIG = {
-  'x-ai/grok-4.1-fast:free': {
-    provider: 'xai',
-    endpoint: 'https://api.x.ai/v1/chat/completions',
-    modelName: 'grok-beta',
-    getHeaders: () => {
-      const key = process.env.XAI_API_KEY;
-      if (!key) throw new Error('Missing XAI_API_KEY');
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-      };
-    },
-    maxTokens: 8192,
-    contextWindow: 128000,
-  },
-  'anthropic/claude-3.5-sonnet:free': {
-    provider: 'anthropic',
-    endpoint: 'https://api.anthropic.com/v1/messages',
-    modelName: 'claude-3-5-sonnet-20240620',
-    getHeaders: () => {
-      const key = process.env.ANTHROPIC_API_KEY;
-      if (!key) throw new Error('Missing ANTHROPIC_API_KEY');
-      return {
-        'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-      };
-    },
-    maxTokens: 4096,
-    contextWindow: 200000,
-  },
-  'openai/gpt-4o-mini:free': {
-    provider: 'openai',
-    endpoint: 'https://api.openai.com/v1/chat/completions',
-    modelName: 'gpt-4o-mini',
-    getHeaders: () => {
-      const key = process.env.OPENAI_API_KEY;
-      if (!key) throw new Error('Missing OPENAI_API_KEY');
-      return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
-      };
-    },
-    maxTokens: 16384,
-    contextWindow: 128000,
-  },
-} as const;
-
-type ModelId = keyof typeof MODEL_CONFIG;
-
-// ================
-// PROMPTS
-// ================
-
-const SYSTEM_PROMPTS = {
-  proofread: `You are a world-class proofreader with expertise in multiple languages. 
-Fix all grammatical errors, spelling mistakes, punctuation issues, and awkward phrasing.
-Maintain the original tone and meaning. Output ONLY the corrected text with no additional commentary.`,
-
-  rewrite: `You are an award-winning editor specializing in clarity and conciseness.
-Rewrite the text to be more engaging and readable while preserving all key information.
-Improve flow, eliminate redundancies, and enhance sentence structure.
-Output ONLY the rewritten text with no additional commentary.`,
-
-  formal: `You are a professional editor for academic and business documents.
-Convert the text to formal language suitable for scholarly publications or executive communications.
-Remove colloquialisms, strengthen weak phrasing, and ensure precise terminology.
-Output ONLY the formal version with no additional commentary.`,
-
-  custom: (instruction: string) =>
-    `You are an expert editor following this specific instruction:
-"${instruction}"
-Output ONLY the edited text with no additional commentary.`,
-};
-
-// ================
-// HELPERS
-// ================
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function truncateText(text: string, maxLength: number): string {
-  return text.length > maxLength ? text.slice(0, maxLength) : text;
-}
-
-// ================
-// MODEL CALLER
-// ================
-
-async function callModel(
-  text: string,
-  level: string,
-  customInstruction: string,
-  modelConfig: (typeof MODEL_CONFIG)[ModelId],
-  round: number
-): Promise<{ content: string; tokens: TokenUsage }> {
-  const systemPrompt =
-    level === 'custom'
-      ? SYSTEM_PROMPTS.custom(customInstruction)
-      : SYSTEM_PROMPTS[level as keyof typeof SYSTEM_PROMPTS];
-
-  const headers = modelConfig.getHeaders();
-  const payload =
-    modelConfig.provider === 'anthropic'
-      ? {
-          model: modelConfig.modelName,
-          max_tokens: modelConfig.maxTokens,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: text }],
-        }
-      : {
-          model: modelConfig.modelName,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: text },
-          ],
-          max_tokens: modelConfig.maxTokens,
-          temperature: 0.3,
-        };
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 28000); // 28s
-
-  try {
-    const startTime = Date.now();
-    const response = await fetch(modelConfig.endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText.slice(0, 200)}`);
-    }
-
-    const result = await response.json();
-    const duration = Date.now() - startTime;
-
-    let content = '';
-    let tokens: TokenUsage = { input: 0, output: 0, total: 0 };
-
-    if (modelConfig.provider === 'anthropic') {
-      content = result.content?.[0]?.text || '';
-      tokens = {
-        input: result.usage?.input_tokens || 0,
-        output: result.usage?.output_tokens || 0,
-        total: (result.usage?.input_tokens || 0) + (result.usage?.output_tokens || 0),
-      };
-    } else {
-      content = result.choices?.[0]?.message?.content || '';
-      tokens = {
-        input: result.usage?.prompt_tokens || 0,
-        output: result.usage?.completion_tokens || 0,
-        total: (result.usage?.prompt_tokens || 0) + (result.usage?.completion_tokens || 0),
-      };
-    }
-
-    return {
-      content: content.trim(),
-      tokens,
-    };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(`Model timed out after 28 seconds (Round ${round})`);
-    }
-    throw new Error(`Model call failed: ${getErrorMessage(error)}`);
-  }
-}
-
-// ================
-// MAIN HANDLER
-// ================
-
-export const maxDuration = 55; // Vercel timeout limit (max 60s)
+const ALLOWED_MODELS = [
+  'allenai/olmo-3.1-32b-think:free',
+  'mistralai/devstral-2512:free',
+  'kwaipilot/kat-coder-pro:free',
+  'openai/gpt-oss-20b:free',
+  'google/gemini-flash-1.5-8b:free'
+];
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const validated = EditRequestSchema.parse(body);
-    const { text, level, customInstruction, model, useEditorialBoard } = validated;
+    const {
+      input,
+      instruction,
+      model: preferredModel,
+      editLevel,
+      useEditorialBoard = false,
+      numVariations = 1 // 🔥 Read this from request
+    } = body;
 
-    const modelKey = model as ModelId;
-    if (!(modelKey in MODEL_CONFIG)) {
-      return NextResponse.json({ error: `Unsupported model: ${model}` }, { status: 400 });
+    // Clamp numVariations between 1 and 3 (to control cost/latency)
+    const variationCount = Math.min(3, Math.max(1, Math.floor(numVariations)));
+
+    // Instruction is always required
+    if (!instruction?.trim()) {
+      return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
     }
 
-    const editorialModels = useEditorialBoard
-      ? (['x-ai/grok-4.1-fast:free', 'anthropic/claude-3.5-sonnet:free', 'openai/gpt-4o-mini:free'] as const)
-      : [modelKey];
+    // Input is only required for editing (not for generation like "Spark")
+    if (editLevel !== 'generate' && !input?.trim()) {
+      return NextResponse.json({ error: 'Input required' }, { status: 400 });
+    }
 
-    let currentText = text;
-    const logs: EditLog[] = [];
-    const startTime = Date.now();
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+    if (!OPENROUTER_API_KEY) {
+      return NextResponse.json({ error: 'Server config error' }, { status: 500 });
+    }
 
-    for (let round = 1; round <= editorialModels.length; round++) {
-      const modelId = editorialModels[round - 1];
-      const config = MODEL_CONFIG[modelId];
+    // Build fallback order: preferred first, then others
+    const modelOrder = [
+      preferredModel,
+      ...ALLOWED_MODELS.filter(m => m !== preferredModel)
+    ].filter(m => ALLOWED_MODELS.includes(m));
 
-      // Truncate to 80% of context window for safety
-      currentText = truncateText(currentText, Math.floor(config.contextWindow * 0.8));
+    let variationsResult: string[] | null = null;
+    let usedModel: string | null = null;
+    let lastError: unknown = null;
 
-      const roundStart = Date.now();
+    for (const model of modelOrder) {
       try {
-        const { content, tokens } = await callModel(
-          currentText,
-          level,
-          customInstruction || '',
-          config,
-          round
-        );
-
-        currentText = content;
-        logs.push({
-          round,
-          model: modelId,
-          duration: Date.now() - roundStart,
-          tokens,
-          success: true,
-          inputPreview: currentText.slice(0, 100).replace(/\n/g, ' ') + '...',
-          outputPreview: content.slice(0, 100).replace(/\n/g, ' ') + '...',
-        });
-      } catch (error) {
-        const duration = Date.now() - roundStart;
-        logs.push({
-          round,
-          model: modelId,
-          duration,
-          tokens: { input: 0, output: 0, total: 0 },
-          success: false,
-          error: getErrorMessage(error),
-          inputPreview: currentText.slice(0, 100).replace(/\n/g, ' ') + '...',
-          outputPreview: '',
-        });
-
-        // In editorial board mode, continue to next model
-        if (!useEditorialBoard) {
-          throw error;
+        const wordCount = input?.trim().split(/\s+/).length || 0;
+        if (wordCount >= 1000) {
+          // For large docs, we don’t support variations (too expensive)
+          const single = await processChunkedEditWithModel(
+            input || '',
+            instruction,
+            model,
+            editLevel,
+            useEditorialBoard,
+            OPENROUTER_API_KEY
+          );
+          variationsResult = [single];
+        } else {
+          // 🔥 Generate multiple variations (unless chunked)
+          const promises = [];
+          for (let i = 0; i < variationCount; i++) {
+            // Slightly different temperature per variation for diversity
+            const temperature = 0.7 + (i * 0.2); // e.g., 0.7, 0.9, 1.1
+            promises.push(
+              callModelWithTemp(
+                input || '',
+                instruction,
+                model,
+                editLevel,
+                OPENROUTER_API_KEY,
+                temperature,
+                useEditorialBoard
+              )
+            );
+          }
+          const results = await Promise.all(promises);
+          // Dedupe & filter empty
+          const unique = [...new Set(results.map(r => r.trim()))].filter(Boolean);
+          variationsResult = unique.length > 0 ? unique : [results[0]];
         }
+        usedModel = model;
+        break;
+      } catch (err) {
+        lastError = err;
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.warn(`⚠️ Model ${model} failed:`, errorMessage);
       }
     }
 
+    if (variationsResult === null) {
+      const fallbackError = lastError instanceof Error ? lastError.message : String(lastError);
+      return NextResponse.json(
+        { error: 'All models failed. Last error: ' + fallbackError },
+        { status: 500 }
+      );
+    }
+
+    // For backward compatibility + UI
+    const primary = variationsResult[0];
+    const { html: trackedHtml, changes } = generateTrackedChanges(input || '', primary);
+
     return NextResponse.json({
-      editedText: currentText,
-      meta: {
-        totalDuration: Date.now() - startTime,
-        rounds: editorialModels.length,
-        editorialBoard: useEditorialBoard,
-        logs,
-      },
+      editedText: primary,
+      variations: variationsResult, // ✅ Now included!
+      trackedHtml,
+      changes,
+      usedModel,
+      variationCount: variationsResult.length
     });
-  } catch (error) {
-    console.error('Edit API error:', error);
-    return NextResponse.json(
-      {
-        error: getErrorMessage(error),
-        logs: (error as any).logs || [],
-      },
-      { status: 500 }
-    );
+
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('❌ Edit API error:', errorMessage);
+    return NextResponse.json({ error: errorMessage || 'Internal error' }, { status: 500 });
   }
+}
+
+// --- Updated: callModel now accepts temperature ---
+async function callModelWithTemp(
+  text: string,
+  instruction: string,
+  model: string,
+  editLevel: string,
+  apiKey: string,
+  temperature: number,
+  useEditorialBoard: boolean
+): Promise<string> {
+  if (useEditorialBoard) {
+    return runSelfRefinementLoop(text, instruction, model, apiKey, temperature);
+  }
+  const system = getSystemPrompt(editLevel as any, instruction);
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://beforepublishing.vercel.app',
+      'X-Title': 'Before Publishing'
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: text }
+      ],
+      max_tokens: 1000,
+      temperature,
+      // Some models require this for non-determinism
+      top_p: temperature > 0.8 ? 0.95 : 0.9
+    })
+  });
+
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({}));
+    const errorMsg = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
+    throw new Error(errorMsg);
+  }
+
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) {
+    throw new Error('Model returned empty content');
+  }
+  return content;
+}
+
+// --- Updated self-refinement to accept temperature ---
+async function runSelfRefinementLoop(
+  original: string,
+  instruction: string,
+  model: string,
+  apiKey: string,
+  baseTemp: number
+): Promise<string> {
+  let current = await callModelWithTemp(original, instruction, model, 'custom', apiKey, baseTemp, false);
+  const prompt2 = `Original: "${original}"\nYour edit: "${current}"\nReview your work. Fix errors. Return ONLY improved text.`;
+  current = await callModelWithTemp(prompt2, 'Self-review', model, 'custom', apiKey, Math.min(1.0, baseTemp + 0.1), false);
+  const prompt3 = `Original: "${original}"\nCurrent: "${current}"\nFinal check. Return ONLY final text.`;
+  current = await callModelWithTemp(prompt3, 'Final polish', model, 'custom', apiKey, Math.min(1.0, baseTemp + 0.2), false);
+  return current;
+}
+
+// --- Chunked Processing (unchanged — returns single string) ---
+async function processChunkedEditWithModel(
+  input: string,
+  instruction: string,
+  model: string,
+  editLevel: string,
+  useEditorialBoard: boolean,
+  apiKey: string
+): Promise<string> {
+  const chunks = splitIntoChunks(input);
+  const editedChunks: string[] = [];
+
+  for (const chunk of chunks) {
+    let edited: string;
+    if (useEditorialBoard) {
+      edited = await runSelfRefinementLoop(chunk, instruction, model, apiKey, 0.7);
+    } else {
+      edited = await callModelWithTemp(chunk, instruction, model, editLevel, apiKey, 0.7, false);
+    }
+    editedChunks.push(edited);
+  }
+
+  return editedChunks.join('\n\n');
+}
+
+// --- DIFF GENERATION (unchanged) ---
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function generateTrackedChanges(original: string, edited: string): { html: string; changes: number } {
+  const words1 = original.split(/\s+/);
+  const words2 = edited.split(/\s+/);
+  const html: string[] = [];
+  let i = 0, j = 0;
+  let changes = 0;
+
+  while (i < words1.length || j < words2.length) {
+    if (i < words1.length && j < words2.length && words1[i] === words2[j]) {
+      html.push(escapeHtml(words1[i]));
+      i++;
+      j++;
+    } else {
+      const startI = i;
+      const startJ = j;
+      while (
+        (i < words1.length && j < words2.length && words1[i] !== words2[j]) ||
+        (i < words1.length && j >= words2.length) ||
+        (i >= words1.length && j < words2.length)
+      ) {
+        if (i < words1.length) i++;
+        if (j < words2.length) j++;
+      }
+      const deleted = words1.slice(startI, i).map(escapeHtml).join(' ');
+      const inserted = words2.slice(startJ, j).map(escapeHtml).join(' ');
+      if (deleted || inserted) {
+        changes++;
+        let group = '';
+        if (deleted) group += `<del>${deleted}</del>`;
+        if (inserted) group += `<ins>${inserted}</ins>`;
+        html.push(`<span class="change-group">${group}</span>`);
+      }
+    }
+  }
+
+  return {
+    html: `<div style="white-space: pre-wrap;">${html.join(' ')}</div>`,
+    changes
+  };
 }

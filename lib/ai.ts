@@ -20,7 +20,8 @@ NEVER:
 - Alter tone, voice, or style
 - Add, remove, or reorder ideas
 
-Return ONLY the corrected text — nothing else.`;
+Return ONLY the corrected text — nothing else.
+Do not add any other text, explanations, or formatting. Stop immediately after the last word of the corrected text.`;
 
     case 'rewrite':
       return `You are an expert editor. Improve clarity, flow, and readability while:
@@ -34,7 +35,8 @@ Do NOT:
 - Change the author’s intent or core message
 - Use overly formal language unless the original is formal
 
-Return ONLY the improved text — nothing else.`;
+Return ONLY the improved text — nothing else.
+Do not add any other text, explanations, or formatting. Stop immediately after the last word of the improved text.`;
 
     case 'formal':
       return `You are a professional editor. Convert this text to formal, polished English by:
@@ -48,7 +50,8 @@ Do NOT:
 - Simplify or omit technical or nuanced content
 - Change the core message or intent
 
-Return ONLY the formal version — nothing else.`;
+Return ONLY the formal version — nothing else.
+Do not add any other text, explanations, or formatting. Stop immediately after the last word of the formal version.`;
 
     case 'generate':
       return `You are a skilled blog writer. Generate a complete, engaging, and well-structured blog post based on the user's instruction. 
@@ -66,11 +69,13 @@ Return ONLY the following JSON object, with no additional text before or after:
   "content": "Full blog content here..."
 }
 
-DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.`;
+DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.
+Stop immediately after the closing brace of the JSON object.`;
 
     case 'custom':
     default:
       return `You are an expert editor. ${customInstruction || 'Improve this text.'} 
-Return ONLY the edited text — nothing else.`;
+Return ONLY the edited text — nothing else.
+Do not add any other text, explanations, or formatting. Stop immediately after the last word of the edited text.`;
   }
 }

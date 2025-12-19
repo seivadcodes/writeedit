@@ -75,6 +75,16 @@ export function useEditor() {
   const setDocumentId = (id: string | null) =>
     setState((prev) => ({ ...prev, documentId: id }));
 
+  // ✅ Newly added setters
+  const setIsLoading = (isLoading: boolean) =>
+    setState((prev) => ({ ...prev, isLoading }));
+
+  const setError = (error: string | null) =>
+    setState((prev) => ({ ...prev, error }));
+
+  const setChangeCount = (changeCount: number) =>
+    setState((prev) => ({ ...prev, changeCount }));
+
   // --- Load a full document
   const loadDocument = (
     documentId: string,
@@ -190,6 +200,11 @@ export function useEditor() {
     loadDocument,
     applyEdit,
     reset,
+
+    // ✅ Export new setters
+    setIsLoading,
+    setError,
+    setChangeCount,
   };
 }
 

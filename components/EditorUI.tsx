@@ -1,21 +1,26 @@
 // /components/EditorUI.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useEditor, EditLevel } from '@/hooks/useEditor';
 import { useDocument, SavedDocument } from '@/hooks/useDocument';
 import { TrackedChangesView } from '@/components/TrackedChangesView';
 
-// Performance-optimized chunk size (adjust based on model capabilities)
-const CHUNK_SIZE = 750; // words per chunk
-const MAX_CONCURRENT_CHUNKS = 4; // balance between speed and API limits
+// Allowed models must match the backend
+const ALLOWED_MODELS = [
+  'mistralai/devstral-2512:free',
+  'kwaipilot/kat-coder-pro:free',
+  'anthropic/claude-3.5-sonnet:free',
+  'google/gemini-flash-1.5-8b:free'
+];
 
 export function EditorUI() {
   const editor = useEditor();
   const docManager = useDocument();
   const trackedRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const processingChunksRef = useRef<AbortController[]>([]);
+  const largeDocTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const {
     documents,
@@ -41,19 +46,23 @@ export function EditorUI() {
     setEditLevel,
     setCustomInstruction,
     setViewMode,
-    applyEdit,
+    applyEdit: originalApplyEdit, // rename to avoid conflict
+    setEditedText,
+    setChangeCount,
+    setIsLoading,
+    setError,
+    setDocumentId,
+    loadDocument,
   } = editor;
 
   const [documentName, setDocumentName] = useState('');
-  const [showDocuments, setShowDocuments] = useState(false);
+  const [showDocuments, setShowDocuments] = useState(false); // Hidden by default
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [chunkProgress, setChunkProgress] = useState<{ processed: number; total: number; isProcessing: boolean }>({
-    processed: 0,
-    total: 0,
-    isProcessing: false
-  });
-  const [chunkResults, setChunkResults] = useState<string[]>([]);
-  const [isChunkedProcessing, setIsChunkedProcessing] = useState(false);
+
+  // === NEW: Large document job state ===
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [isProcessingLargeDoc, setIsProcessingLargeDoc] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   // Auto-show document panel after first edit
   useEffect(() => {
@@ -68,13 +77,6 @@ export function EditorUI() {
       setDocumentName(name);
     }
   }, [inputText]);
-
-  // Cleanup chunk processing on unmount
-  useEffect(() => {
-    return () => {
-      processingChunksRef.current.forEach(controller => controller.abort());
-    };
-  }, []);
 
   const extractCleanTextFromTrackedDOM = useCallback((): string => {
     if (!trackedRef.current) return editedText;
@@ -120,184 +122,6 @@ export function EditorUI() {
     URL.revokeObjectURL(url);
   };
 
-  // Ultra-fast text chunking algorithm
-  const chunkText = useCallback((text: string, chunkSize: number): string[] => {
-    const paragraphs = text.split(/\n{2,}/);
-    const chunks: string[] = [];
-    let currentChunk: string[] = [];
-    let currentWordCount = 0;
-
-    // First try to chunk by paragraphs
-    for (const para of paragraphs) {
-      const wordCount = para.trim().split(/\s+/).filter(w => w).length;
-      
-      if (currentWordCount + wordCount > chunkSize && currentChunk.length > 0) {
-        chunks.push(currentChunk.join('\n\n'));
-        currentChunk = [];
-        currentWordCount = 0;
-      }
-      
-      if (wordCount > chunkSize * 2) {
-        // Handle extremely large paragraphs by splitting them
-        const sentences = para.split(/(?<=[.!?])\s+/);
-        let sentenceChunk = '';
-        let sentenceWordCount = 0;
-        
-        for (const sentence of sentences) {
-          const sWordCount = sentence.trim().split(/\s+/).filter(w => w).length;
-          
-          if (sentenceWordCount + sWordCount > chunkSize && sentenceChunk) {
-            chunks.push(sentenceChunk.trim());
-            sentenceChunk = sentence;
-            sentenceWordCount = sWordCount;
-          } else {
-            sentenceChunk = sentenceChunk ? `${sentenceChunk} ${sentence}` : sentence;
-            sentenceWordCount += sWordCount;
-          }
-        }
-        
-        if (sentenceChunk) {
-          chunks.push(sentenceChunk.trim());
-        }
-      } else {
-        currentChunk.push(para);
-        currentWordCount += wordCount;
-      }
-    }
-
-    if (currentChunk.length > 0) {
-      chunks.push(currentChunk.join('\n\n'));
-    }
-
-    return chunks;
-  }, []);
-
-  // Process large documents by chunking
-  const processLargeDocument = useCallback(async () => {
-    if (!inputText.trim()) return;
-    
-    const totalWords = inputText.trim().split(/\s+/).filter(w => w).length;
-    if (totalWords <= 2000) {
-      // Small enough for single request
-      applyEdit();
-      return;
-    }
-    
-    // Start chunked processing
-    setIsChunkedProcessing(true);
-    setChunkProgress({ processed: 0, total: 0, isProcessing: true });
-    setChunkResults([]);
-    
-    // Split text into chunks
-    const chunks = chunkText(inputText, CHUNK_SIZE);
-    setChunkProgress(prev => ({ ...prev, total: chunks.length }));
-    
-    // Reset abort controllers
-    processingChunksRef.current.forEach(controller => controller.abort());
-    processingChunksRef.current = [];
-    
-    // Process chunks with controlled concurrency
-    const results: string[] = new Array(chunks.length).fill('');
-    let nextChunkIndex = 0;
-    let activeRequests = 0;
-    let isAborted = false;
-    
-    const processNextChunk = async () => {
-      if (isAborted || nextChunkIndex >= chunks.length) return;
-      
-      const chunkIndex = nextChunkIndex++;
-      const controller = new AbortController();
-      processingChunksRef.current.push(controller);
-      
-      try {
-        activeRequests++;
-        setChunkProgress(prev => ({ ...prev, processed: prev.processed + 1 }));
-        
-        const response = await fetch('/api/edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input: chunks[chunkIndex],
-            instruction: editLevel === 'custom' ? customInstruction : editLevel,
-            model: 'mistralai/devstral-2512:free',
-            editLevel,
-            chunkIndex,
-            totalChunks: chunks.length
-          }),
-          signal: controller.signal
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        results[chunkIndex] = data.editedText || chunks[chunkIndex];
-      } catch (err) {
-        if (!(err instanceof Error) || !err.message.includes('Abort')) {
-          console.error(`Chunk ${chunkIndex} failed:`, err);
-          // Retry once on failure
-          try {
-            results[chunkIndex] = chunks[chunkIndex]; // fallback to original
-          } catch (retryErr) {
-            console.error(`Chunk ${chunkIndex} retry failed:`, retryErr);
-            results[chunkIndex] = chunks[chunkIndex]; // fallback to original
-          }
-        }
-      } finally {
-        activeRequests--;
-        
-        // If all chunks processed, combine results
-        if (activeRequests === 0 && nextChunkIndex >= chunks.length) {
-          if (!isAborted) {
-            // Combine results while preserving paragraph structure
-            const combined = results.filter(Boolean).join('\n\n');
-            editor.setEditedText(combined);
-            setIsChunkedProcessing(false);
-            setChunkProgress({ processed: chunks.length, total: chunks.length, isProcessing: false });
-            setShowDocuments(true);
-          }
-        }
-      }
-    };
-    
-    // Start initial batch of requests
-    const initialBatch = Math.min(MAX_CONCURRENT_CHUNKS, chunks.length);
-    for (let i = 0; i < initialBatch; i++) {
-      processNextChunk();
-    }
-    
-    // Process remaining chunks as slots become available
-    const interval = setInterval(() => {
-      if (isAborted) {
-        clearInterval(interval);
-        return;
-      }
-      
-      while (activeRequests < MAX_CONCURRENT_CHUNKS && nextChunkIndex < chunks.length) {
-        processNextChunk();
-      }
-      
-      if (activeRequests === 0 && nextChunkIndex >= chunks.length) {
-        clearInterval(interval);
-      }
-    }, 100);
-    
-    // Cleanup function
-    return () => {
-      isAborted = true;
-      clearInterval(interval);
-      processingChunksRef.current.forEach(controller => controller.abort());
-      processingChunksRef.current = [];
-    };
-  }, [inputText, editLevel, customInstruction, chunkText, applyEdit, editor]);
-
-  const enhancedApplyEdit = useCallback(async () => {
-  if (isLoading || isChunkedProcessing) return;
-  await processLargeDocument();
-}, [isLoading, isChunkedProcessing, processLargeDocument]);
-
   const handleAcceptChange = useCallback(() => {}, []);
   const handleRejectChange = useCallback(() => {}, []);
 
@@ -305,12 +129,12 @@ export function EditorUI() {
     const original = inputText;
     const final = extractCleanTextFromTrackedDOM();
     if (!original.trim() || !final.trim()) {
-      alert('No valid content to save. Please run "Edit" first.');
+      alert('No valid content to save. Please run “Edit” first.');
       return;
     }
     const id = await saveDocument(final, original, documentName);
     if (id) {
-      editor.setDocumentId(id);
+      setDocumentId(id);
       setDocumentName('');
     }
   };
@@ -326,7 +150,7 @@ export function EditorUI() {
   };
 
   const handleDocumentClick = (doc: SavedDocument) => {
-    editor.loadDocument(doc.id, {
+    loadDocument(doc.id, {
       originalText: doc.original_text,
       editedText: doc.edited_text,
       level: doc.level,
@@ -360,7 +184,7 @@ export function EditorUI() {
         });
         text = reader.result as string;
       } else {
-        alert('Please upload .docx or .doc files only.');
+        alert('SupportedContent type. Please upload .docx or .doc files only.');
         setSelectedFile(null);
         return;
       }
@@ -378,7 +202,7 @@ export function EditorUI() {
       }
     } catch (err) {
       console.error('File parsing error:', err);
-      alert('Failed to read document. Please ensure it\'s a valid Microsoft Word file.');
+      alert('Failed to read document. Please ensure it’s a valid Microsoft Word file.');
     } finally {
       setSelectedFile(null);
     }
@@ -387,6 +211,137 @@ export function EditorUI() {
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
+
+  // === ENHANCED applyEdit with large doc support ===
+  const applyEdit = async () => {
+    if (isLoading || isProcessingLargeDoc) return;
+    
+    const trimmedInput = inputText.trim();
+    if (!trimmedInput) {
+      alert('Please enter text to edit.');
+      return;
+    }
+    
+    // For very large documents, use the new job-based approach
+    const currentWordCount = trimmedInput.split(/\s+/).length;
+    const isVeryLarge = currentWordCount > 15000;
+    
+    setIsLoading(true);
+    setError(null);
+    setJobId(null);
+    setIsProcessingLargeDoc(isVeryLarge);
+    
+    try {
+      if (isVeryLarge) {
+        // Start large document processing job
+        const response = await fetch('/api/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input: trimmedInput,
+            instruction: editLevel === 'custom' ? customInstruction : undefined,
+            editLevel,
+            useEditorialBoard: false,
+            model: ALLOWED_MODELS[0], // Initial model
+          })
+        });
+        
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to start processing: ${response.status}`);
+        }
+        
+        const { jobId } = await response.json();
+        if (!jobId) {
+          throw new Error('Server did not return a job ID');
+        }
+        setJobId(jobId);
+        setProgress(0);
+        
+        // Start polling for job status
+        pollJobStatus(jobId);
+      } else {
+        // Use existing approach for smaller documents
+        await originalApplyEdit();
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage);
+      console.error('Edit failed:', errorMessage);
+      setIsLoading(false);
+      setIsProcessingLargeDoc(false);
+    }
+  };
+
+  // === Polling function for large doc jobs ===
+  const pollJobStatus = async (currentJobId: string) => {
+    try {
+      const response = await fetch('/api/edit/status', { // NOTE: changed endpoint
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: currentJobId })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Status check failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.status === 'processing') {
+        // Update progress
+        setProgress(Math.min(99, result.progress || 0));
+        
+        // Continue polling
+        largeDocTimeoutRef.current = setTimeout(() => {
+          pollJobStatus(currentJobId);
+        }, 2000);
+      } else if (result.status === 'completed') {
+        // Processing complete
+        if (largeDocTimeoutRef.current) clearTimeout(largeDocTimeoutRef.current);
+        
+        let finalResult;
+        try {
+          // Assume backend returns { editedText, trackedHtml, changes, usedModels }
+          finalResult = result;
+        } catch {
+          finalResult = { editedText: result.editedText, trackedHtml: null, changes: -1 };
+        }
+        
+        setEditedText(finalResult.editedText);
+        setChangeCount(finalResult.changes || 0);
+        setIsLoading(false);
+        setIsProcessingLargeDoc(false);
+        setJobId(null);
+        
+        const modelsUsed = result.usedModels?.join(', ') || 'multiple models';
+        alert(`✅ Editing complete using ${modelsUsed}`);
+      } else if (result.status === 'failed') {
+        if (largeDocTimeoutRef.current) clearTimeout(largeDocTimeoutRef.current);
+        setError(result.error || 'Processing failed');
+        setIsLoading(false);
+        setIsProcessingLargeDoc(false);
+        setJobId(null);
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('Polling error:', errorMessage);
+      
+      // Retry with backoff
+      largeDocTimeoutRef.current = setTimeout(() => {
+        pollJobStatus(currentJobId);
+      }, 5000);
+    }
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (largeDocTimeoutRef.current) {
+        clearTimeout(largeDocTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6 bg-white text-black min-h-screen">
@@ -446,7 +401,7 @@ export function EditorUI() {
           placeholder="Paste your text here or upload a Word document above..."
           rows={8}
           className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          disabled={isLoading || isChunkedProcessing}
+          disabled={isLoading || isProcessingLargeDoc}
         />
       </div>
 
@@ -463,7 +418,6 @@ export function EditorUI() {
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
               }`}
               onClick={() => setEditLevel(level)}
-              disabled={isLoading || isChunkedProcessing}
             >
               {level.charAt(0).toUpperCase() + level.slice(1)}
             </button>
@@ -476,46 +430,66 @@ export function EditorUI() {
             onChange={(e) => setCustomInstruction(e.target.value)}
             placeholder="Enter custom instruction..."
             className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black bg-white"
-            disabled={isLoading || isChunkedProcessing}
           />
         )}
       </div>
 
-      {/* === 3. ✨ Enhanced Edit Button with Chunk Processing === */}
+      {/* === 3. ✨ Enhanced Edit Button === */}
       <div>
         <button
           id="edit-btn"
-          onClick={enhancedApplyEdit}
-          disabled={isLoading || isChunkedProcessing || !inputText.trim()}
+          onClick={applyEdit}
+          disabled={isLoading || isProcessingLargeDoc || !inputText.trim()}
           className={`px-4 py-2 rounded-md font-medium ${
-            isLoading || isChunkedProcessing
+            isLoading || isProcessingLargeDoc
               ? 'bg-gray-400 cursor-not-allowed'
               : inputText.trim()
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
         >
-          {isLoading ? '⏳ Processing...' : isChunkedProcessing ? `🚀 Processing (${chunkProgress.processed}/${chunkProgress.total})` : '✨ Edit'}
+          {isProcessingLargeDoc ? (
+            <span className="flex items-center justify-center">
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Processing {progress}% ({Math.round(wordCount / 1000)}k words)
+            </span>
+          ) : isLoading ? (
+            '⏳ Processing...'
+          ) : (
+            '✨ Edit'
+          )}
         </button>
         
-        {isChunkedProcessing && (
-          <div className="mt-2">
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div 
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
-                style={{ width: `${(chunkProgress.processed / chunkProgress.total) * 100}%` }}
-              ></div>
-            </div>
+        {jobId && (
+          <div className="mt-2 text-sm text-blue-600">
+            Job ID: {jobId.substring(0, 8)}... (processing large document)
           </div>
         )}
         
         {(error || docError) && (
           <p className="mt-2 text-red-600 text-sm">{error || docError}</p>
         )}
+        
+        {isProcessingLargeDoc && progress > 0 && (
+          <div className="mt-2">
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div 
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                style={{ width: `${progress}%` }}
+              ></div>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Processing with multiple free models ({progress}% complete)
+            </p>
+          </div>
+        )}
       </div>
 
       {/* === 4. Edited Result === */}
-      {(editedText || isLoading || isChunkedProcessing) && (
+      {(editedText || isLoading || isProcessingLargeDoc) && (
         <div>
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold text-black">Edited Result</h2>
@@ -523,24 +497,14 @@ export function EditorUI() {
               <button
                 id="copy-btn"
                 onClick={handleCopy}
-                disabled={isLoading || isChunkedProcessing}
-                className={`px-3 py-1 text-sm rounded ${
-                  isLoading || isChunkedProcessing
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-200 hover:bg-gray-300'
-                }`}
+                className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
               >
                 📋 Copy
               </button>
               <button
                 id="download-btn"
                 onClick={handleDownload}
-                disabled={isLoading || isChunkedProcessing}
-                className={`px-3 py-1 text-sm rounded ${
-                  isLoading || isChunkedProcessing
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-gray-200 hover:bg-gray-300'
-                }`}
+                className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
               >
                 💾 Download
               </button>
@@ -555,7 +519,6 @@ export function EditorUI() {
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
               }`}
               onClick={() => setViewMode('clean')}
-              disabled={isLoading || isChunkedProcessing}
             >
               Clean View
             </button>
@@ -566,7 +529,6 @@ export function EditorUI() {
                   : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
               }`}
               onClick={() => setViewMode('tracked')}
-              disabled={isLoading || isChunkedProcessing}
             >
               Tracked Changes ({changeCount} change{changeCount !== 1 ? 's' : ''})
             </button>
@@ -578,23 +540,23 @@ export function EditorUI() {
             style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
           >
             {viewMode === 'clean' ? (
-              editedText || (isChunkedProcessing ? 'Processing large document in chunks...' : 'Result will appear here...')
+              editedText || 'Result will appear here...'
             ) : (
-            <TrackedChangesView
-  key={documentId || 'new'}
-  originalText={inputText}
-  editedText={editedText}
-  onAcceptChange={handleAcceptChange}
-  onRejectChange={handleRejectChange}
-/>
+              <TrackedChangesView
+                key={documentId || 'new'}
+                originalText={inputText}
+                editedText={editedText}
+                onAcceptChange={handleAcceptChange}
+                onRejectChange={handleRejectChange}
+              />
             )}
           </div>
         </div>
       )}
 
-      {!editedText && !isLoading && !isChunkedProcessing && (
+      {!editedText && !isLoading && !isProcessingLargeDoc && (
         <div className="p-3 bg-gray-50 border rounded text-gray-500 text-sm">
-          Result will appear here after you click "Edit".
+          Result will appear here after you click “Edit”.
         </div>
       )}
 
@@ -619,13 +581,12 @@ export function EditorUI() {
               onChange={(e) => setDocumentName(e.target.value)}
               placeholder="Document name..."
               className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
-              disabled={isLoading || isChunkedProcessing}
             />
             <div className="flex gap-2">
               <button
                 id="save-document-btn"
                 onClick={handleSaveDocument}
-                disabled={isLoading || isDocLoading || isChunkedProcessing || !editedText}
+                disabled={isLoading || isProcessingLargeDoc || isDocLoading || !editedText}
                 className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
               >
                 💾 Save Document
@@ -633,7 +594,7 @@ export function EditorUI() {
               <button
                 id="save-progress-btn"
                 onClick={handleSaveProgress}
-                disabled={!documentId || isLoading || isDocLoading || isChunkedProcessing || !editedText}
+                disabled={!documentId || isLoading || isProcessingLargeDoc || isDocLoading || !editedText}
                 className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
               >
                 🔄 Save Progress

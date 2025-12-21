@@ -29,31 +29,29 @@ function sanitizePlainText(text: string): string {
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { input, instruction, editLevel, numVariations = 1 } = body;
-
+  
   if (!instruction || !editLevel) {
     return NextResponse.json(
       { error: 'Missing instruction or editLevel' },
       { status: 400 }
     );
   }
-
+  
   const variations = Math.min(Math.max(parseInt(numVariations as any, 10) || 1, 1), 5);
-
   const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
   if (!OPENROUTER_API_KEY) {
     console.error('❌ Missing OPENROUTER_API_KEY');
     return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
   }
-
+  
   const VALID_MODELS = FREE_MODELS.filter(m => typeof m === 'string' && m.endsWith(':free'));
-
   if (VALID_MODELS.length === 0) {
     return NextResponse.json(
       { error: 'No valid free models configured' },
       { status: 500 }
     );
   }
-
+  
   let systemPrompt = '';
   if (editLevel === 'proofread') {
     systemPrompt = `You are a meticulous proofreader. Fix ONLY the following:
@@ -76,7 +74,7 @@ Return ONLY the corrected plain text — nothing else.`;
 - Avoiding unnecessary wordiness
 Do NOT:
 - Invent new facts, examples, or details
-- Change the author’s intent or core message
+- Change the author's intent or core message
 - Use overly formal language unless the original is formal
 - Use ANY formatting (like **bold**, *italic*, markdown, or UI labels)
 Return ONLY the improved plain text — nothing else.`;
@@ -112,12 +110,12 @@ DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.`;
 NEVER use markdown, bold (**), italic (*), headings, or any formatting. 
 Return ONLY the edited plain text — nothing else.`;
   }
-
+  
   const userPrompt = `Instruction: "${instruction}"${input ? `\nText: "${input}"` : ''}`;
-
+  
   async function makeCompletionWithModel(useModel: string, temp: number) {
-    const origin = (request.headers.get('origin') || 'https://beforepublishing.vercel.app').trim();
-    const apiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const origin = (request.headers.get('origin') || 'https://beforepublishing.vercel.app ').trim();
+    const apiRes = await fetch('https://openrouter.ai/api/v1/chat/completions ', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -135,19 +133,19 @@ Return ONLY the edited plain text — nothing else.`;
         temperature: temp,
       }),
     });
-
+    
     if (!apiRes.ok) {
       const errData = await apiRes.json().catch(() => ({}));
       const msg = errData.error?.message || apiRes.statusText;
       throw new Error(`HTTP ${apiRes.status}: ${msg}`);
     }
-
+    
     const data = await apiRes.json();
     const content = data.choices?.[0]?.message?.content?.trim() || '';
     if (!content) throw new Error('Empty response from model');
     return content;
   }
-
+  
   async function tryModelsUntilSuccess(models: string[], temp: number) {
     let lastError: Error | null = null;
     for (const model of models) {
@@ -162,12 +160,12 @@ Return ONLY the edited plain text — nothing else.`;
     }
     throw lastError || new Error('All models failed');
   }
-
+  
   try {
     if (editLevel === 'generate') {
       const { output: rawOutput, model: usedModel } = await tryModelsUntilSuccess(VALID_MODELS, 0.9);
       console.log(`📝 Used model for generate: ${usedModel}`);
-
+      
       const extractJson = (str: string) => {
         if (!str) return null;
         let start = str.indexOf('{');
@@ -184,7 +182,7 @@ Return ONLY the edited plain text — nothing else.`;
         }
         return null;
       };
-
+      
       let parsed = extractJson(rawOutput);
       if (!parsed || !parsed.title || !parsed.content) {
         console.warn('AI JSON fallback triggered. Raw:', rawOutput.substring(0, 300));
@@ -194,11 +192,10 @@ Return ONLY the edited plain text — nothing else.`;
           content: rawOutput || "No content generated."
         };
       }
-
+      
       // For generate, content may contain prose — sanitize it too
       parsed.content = sanitizePlainText(parsed.content);
       parsed.excerpt = sanitizePlainText(parsed.excerpt);
-
       return NextResponse.json({ generatedPost: parsed });
     } else {
       if (variations === 1) {
@@ -215,9 +212,11 @@ Return ONLY the edited plain text — nothing else.`;
             return null;
           })
         );
+        
         const results = (await Promise.all(promises))
           .filter(r => typeof r === 'string')
           .map(r => sanitizePlainText(r)) as string[];
+        
         if (results.length === 0) results.push(input ? sanitizePlainText(input) : 'No alternative available.');
         return NextResponse.json({ variations: results });
       }

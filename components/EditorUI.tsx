@@ -298,7 +298,7 @@ const EditorUI = () => {
   return (
     <div style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
       <div style={containerStyle}>
-        <h1 style={headingStyle}>AI Editorial Board — Document Editor</h1>
+        <h1 style={headingStyle}>Editorial Board</h1>
 
         <div style={sectionBase}>
           <h3 style={{ marginTop: 0 }}>Input Text</h3>

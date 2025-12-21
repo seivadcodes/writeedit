@@ -13,6 +13,19 @@ const FREE_MODELS = [
   'tngtech/deepseek-r1t2-chimera:free',
 ];
 
+// 🧹 Helper: Strip Markdown bold/italic/headers from plain text
+function sanitizePlainText(text: string): string {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')        // **bold** → bold
+    .replace(/\*(.*?)\*/g, '$1')            // *italic* → italic
+    .replace(/__(.*?)__/g, '$1')            // __bold__ → bold
+    .replace(/_(.*?)_/g, '$1')              // _italic_ → italic
+    .replace(/^#{1,6}\s*/gm, '')            // # Heading → Heading
+    .replace(/\s+/g, ' ')                   // Normalize excessive whitespace
+    .trim();
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const { input, instruction, editLevel, numVariations = 1 } = body;
@@ -53,7 +66,8 @@ NEVER:
 - Change word choice (even if awkward or informal)
 - Alter tone, voice, or style
 - Add, remove, or reorder ideas
-Return ONLY the corrected text — nothing else.`;
+- Use ANY formatting (e.g., **bold**, *italic*, headings, lists, markdown, or labels)
+Return ONLY the corrected plain text — nothing else.`;
   } else if (editLevel === 'rewrite') {
     systemPrompt = `You are an expert editor. Improve clarity, flow, and readability while:
 - Preserving the original meaning exactly
@@ -64,7 +78,8 @@ Do NOT:
 - Invent new facts, examples, or details
 - Change the author’s intent or core message
 - Use overly formal language unless the original is formal
-Return ONLY the improved text — nothing else.`;
+- Use ANY formatting (like **bold**, *italic*, markdown, or UI labels)
+Return ONLY the improved plain text — nothing else.`;
   } else if (editLevel === 'formal') {
     systemPrompt = `You are a professional editor. Convert this text to formal, polished English by:
 - Replacing all contractions ("don't" → "do not", "it's" → "it is")
@@ -75,14 +90,15 @@ Do NOT:
 - Add filler phrases like "It is important to note that..."
 - Simplify or omit technical or nuanced content
 - Change the core message or intent
-Return ONLY the formal version — nothing else.`;
+- Use ANY formatting (e.g., **bold**, markdown, headings)
+Return ONLY the formal plain text — nothing else.`;
   } else if (editLevel === 'generate') {
     systemPrompt = `You are a skilled blog writer. Generate a complete, engaging, and well-structured blog post based on the user's instruction. 
 Include:
 - A compelling title
 - A short excerpt (1–2 sentences)
 - A full body with paragraphs, examples, and a natural tone
-- No markdown, just plain text
+- No markdown, no formatting, just plain text
 - Do NOT include any disclaimers like "Here is a blog post..." or "As an AI..."
 Return ONLY the following JSON object, with no additional text before or after:
 {
@@ -92,7 +108,9 @@ Return ONLY the following JSON object, with no additional text before or after:
 }
 DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.`;
   } else {
-    systemPrompt = `You are an expert editor. Follow the user's instruction precisely while maintaining the core meaning and intent of the original text. Return ONLY the edited text — nothing else.`;
+    systemPrompt = `You are an expert editor. Follow the user's instruction precisely while maintaining the core meaning and intent of the original text. 
+NEVER use markdown, bold (**), italic (*), headings, or any formatting. 
+Return ONLY the edited plain text — nothing else.`;
   }
 
   const userPrompt = `Instruction: "${instruction}"${input ? `\nText: "${input}"` : ''}`;
@@ -177,12 +195,17 @@ DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.`;
         };
       }
 
+      // For generate, content may contain prose — sanitize it too
+      parsed.content = sanitizePlainText(parsed.content);
+      parsed.excerpt = sanitizePlainText(parsed.excerpt);
+
       return NextResponse.json({ generatedPost: parsed });
     } else {
       if (variations === 1) {
         const { output, model: usedModel } = await tryModelsUntilSuccess(VALID_MODELS, 0.7);
         console.log(`📝 Used model for edit: ${usedModel}`);
-        return NextResponse.json({ editedText: output });
+        const cleanedOutput = sanitizePlainText(output);
+        return NextResponse.json({ editedText: cleanedOutput });
       } else {
         const { model: workingModel } = await tryModelsUntilSuccess(VALID_MODELS, 0.7);
         const temps = [0.6, 0.7, 0.8, 0.9, 1.0].slice(0, variations);
@@ -192,15 +215,17 @@ DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.`;
             return null;
           })
         );
-        const results = (await Promise.all(promises)).filter(r => r) as string[];
-        if (results.length === 0) results.push(input || 'No alternative available.');
+        const results = (await Promise.all(promises))
+          .filter(r => typeof r === 'string')
+          .map(r => sanitizePlainText(r)) as string[];
+        if (results.length === 0) results.push(input ? sanitizePlainText(input) : 'No alternative available.');
         return NextResponse.json({ variations: results });
       }
     }
   } catch (err) {
     console.error('Server error in /api/edit:', err);
     return NextResponse.json(
-      { error: 'Internal server error', details: (err as Error).message },
+      { error: 'Internal server error', details: process.env.NODE_ENV === 'development' ? (err as Error).message : undefined },
       { status: 500 }
     );
   }

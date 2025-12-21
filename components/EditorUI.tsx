@@ -1,658 +1,657 @@
-// /components/EditorUI.tsx
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { useEditor, EditLevel } from '@/hooks/useEditor';
-import { useDocument, SavedDocument } from '@/hooks/useDocument';
-import { TrackedChangesView } from '@/components/TrackedChangesView';
+import React, { useState, useEffect, useRef } from 'react';
+import { useAIEditor } from '@/hooks/useAIEditor';
+import type { SavedDocument } from '@/hooks/useSavedDocuments';
 
-// Allowed models must match the backend
-const ALLOWED_MODELS = [
-  'mistralai/devstral-2512:free',
-  'kwaipilot/kat-coder-pro:free',
-  'anthropic/claude-3.5-sonnet:free',
-  'google/gemini-flash-1.5-8b:free'
-];
+// Define theme constants
+const theme = {
+  primary: '#4CAF50',
+  secondary: '#2196F3',
+  danger: '#f44336',
+  bg: '#f9f9f9',
+  card: '#fff',
+  border: '#ddd',
+  text: '#333',
+  textLight: '#666',
+  success: '#4CAF50',
+  warning: '#ff9800',
+  error: '#f44336',
+  info: '#2196F3',
+};
 
-export function EditorUI() {
-  const editor = useEditor();
-  const docManager = useDocument();
-  const trackedRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const largeDocTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+// Reusable style blocks
+const sectionBase = {
+  backgroundColor: theme.card,
+  border: `1px solid ${theme.border}`,
+  borderRadius: '8px',
+  padding: '16px',
+  marginBottom: '20px',
+  boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+};
 
+const buttonBase = {
+  backgroundColor: theme.primary,
+  color: 'white',
+  border: 'none',
+  padding: '8px 12px',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  fontWeight: 'bold' as const,
+  minWidth: 'max-content',
+  transition: 'background 0.2s',
+};
+
+const toggleView = (isActive: boolean) => ({
+  padding: '6px 12px',
+  backgroundColor: isActive ? theme.primary : '#e0e0e0',
+  border: `1px solid ${theme.border}`,
+  borderRadius: '4px',
+  cursor: 'pointer',
+  color: isActive ? 'white' : 'inherit',
+  transition: 'all 0.2s',
+  fontSize: '14px',
+});
+
+const levelOption = (isActive: boolean) => ({
+  display: 'inline-block',
+  padding: '6px 12px',
+  margin: '4px',
+  backgroundColor: isActive ? theme.primary : '#e0e0e0',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  color: isActive ? 'white' : 'inherit',
+  transition: 'all 0.2s',
+});
+
+const inputStyle = {
+  width: '100%',
+  padding: '8px',
+  margin: '4px 0',
+  border: `1px solid ${theme.border}`,
+  borderRadius: '4px',
+  fontFamily: 'inherit',
+  fontSize: '14px',
+};
+
+const textareaStyle = {
+  width: '100%',
+  minHeight: '120px',
+  padding: '10px',
+  border: `1px solid ${theme.border}`,
+  borderRadius: '4px',
+  resize: 'vertical' as const,
+  fontFamily: 'inherit',
+  fontSize: '14px',
+  lineHeight: 1.5,
+};
+
+const resultBox = {
+  whiteSpace: 'pre-wrap' as const,
+  padding: '12px',
+  backgroundColor: '#fafafa',
+  border: `1px solid ${theme.border}`,
+  borderRadius: '4px',
+  minHeight: '100px',
+  marginTop: '10px',
+  maxHeight: '60vh',
+  overflow: 'auto',
+  lineHeight: 1.6,
+};
+
+const statusStyle = (type: 'success' | 'warning' | 'error' | 'info') => ({
+  padding: '8px',
+  marginTop: '10px',
+  marginBottom: '10px',
+  borderRadius: '4px',
+  backgroundColor:
+    type === 'success'
+      ? '#e6ffe6'
+      : type === 'warning'
+      ? '#fff3cd'
+      : type === 'error'
+      ? '#ffe6e6'
+      : '#e7f3ff',
+  color:
+    type === 'success'
+      ? 'green'
+      : type === 'warning'
+      ? '#856404'
+      : type === 'error'
+      ? 'red'
+      : '#004085',
+  border: `1px solid ${
+    type === 'success'
+      ? '#c3e6cb'
+      : type === 'warning'
+      ? '#ffe0b2'
+      : type === 'error'
+      ? '#f5c6cb'
+      : '#bee5eb'
+  }`,
+});
+
+const documentItemStyle = {
+  padding: '10px',
+  marginBottom: '8px',
+  backgroundColor: 'white',
+  borderRadius: '5px',
+  border: '1px solid #eee',
+  cursor: 'pointer',
+  transition: 'all 0.2s',
+};
+
+const containerStyle = {
+  maxWidth: '1200px',
+  margin: '0 auto',
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  backgroundColor: theme.bg,
+  color: theme.text,
+  padding: '12px',
+  lineHeight: 1.6,
+};
+
+const headingStyle = {
+  marginBottom: '12px',
+  fontSize: '24px',
+  textAlign: 'center' as const,
+  color: theme.text,
+};
+
+const progressBarContainer = {
+  marginTop: '15px',
+  backgroundColor: '#e0e0e0',
+  borderRadius: '10px',
+  height: '20px',
+  overflow: 'hidden',
+};
+
+const progressBarFill = (progress: number, success: boolean) => ({
+  height: '100%',
+  backgroundColor: success ? theme.success : theme.primary,
+  width: `${progress}%`,
+  transition: 'width 0.3s ease',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'white',
+  fontSize: '12px',
+  fontWeight: 'bold' as const,
+});
+
+const chunkStatusStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  marginTop: '8px',
+  fontSize: '13px',
+  color: theme.textLight,
+};
+
+const chunkItemStyle = (isActive: boolean) => ({
+  padding: '6px 10px',
+  margin: '2px',
+  borderRadius: '4px',
+  backgroundColor: isActive ? theme.primary : '#f0f0f0',
+  color: isActive ? 'white' : theme.text,
+  fontSize: '12px',
+  cursor: 'pointer',
+  transition: 'all 0.2s',
+});
+
+const fileUploadButtonStyle = {
+  ...buttonBase,
+  backgroundColor: theme.secondary,
+  display: 'inline-block',
+  marginBottom: '15px',
+  cursor: 'pointer',
+  padding: '8px 12px',
+  fontSize: '14px',
+};
+
+const EditorUI = () => {
   const {
-    documents,
-    isLoading: isDocLoading,
-    error: docError,
-    saveDocument,
-    saveProgress,
-    deleteDocument,
-  } = docManager;
-
-  const {
-    inputText,
-    editedText,
     editLevel,
     customInstruction,
-    isLoading,
-    error,
-    viewMode,
+    inputText,
     wordCount,
-    documentId,
-    changeCount,
-    setInputText,
+    resultClean,
+    resultTracked,
+    changesCount,
+    activeView,
+    documentName,
+    showDocuments,
+    savedDocuments,
+    status,
+    isLoading,
+    currentChunkIndex,
+    chunks,
+    chunkResults,
+    progressMetrics,
+    currentDocumentId,
+
     setEditLevel,
     setCustomInstruction,
-    setViewMode,
-    applyEdit: originalApplyEdit, // rename to avoid conflict
-    setEditedText,
-    setChangeCount,
-    setIsLoading,
-    setError,
-    setDocumentId,
+    setInputText,
+    setActiveView,
+    setDocumentName,
+
+    handleApplyEdit,
+    handleCopy,
+    handleSaveNew,
+    handleSaveProgress,
+    toggleDocuments,
     loadDocument,
-  } = editor;
+    deleteDocument,
+  } = useAIEditor();
 
-  const [documentName, setDocumentName] = useState('');
-  const [showDocuments, setShowDocuments] = useState(false); // Hidden by default
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [clipboardSupported, setClipboardSupported] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // === NEW: Large document job state ===
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [isProcessingLargeDoc, setIsProcessingLargeDoc] = useState(false);
-  const [progress, setProgress] = useState(0);
-
-  // Auto-show document panel after first edit
+  // Check clipboard API support on mount
   useEffect(() => {
-    if (editedText && !isLoading) {
-      setShowDocuments(true);
-    }
-  }, [editedText, isLoading]);
-
-  useEffect(() => {
-    if (!documentName.trim() && inputText.trim()) {
-      const name = inputText.substring(0, 50).replace(/\s+/g, ' ').trim() + (inputText.length > 50 ? '...' : '');
-      setDocumentName(name);
-    }
-  }, [inputText]);
-
-  const extractCleanTextFromTrackedDOM = useCallback((): string => {
-    if (!trackedRef.current) return editedText;
-
-    const clone = trackedRef.current.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('.change-action, del').forEach(el => el.remove());
-    clone.querySelectorAll('ins').forEach(el => {
-      const text = document.createTextNode(el.textContent || '');
-      el.replaceWith(text);
-    });
-    clone.querySelectorAll('.change-group').forEach(group => {
-      while (group.firstChild) {
-        group.parentNode?.insertBefore(group.firstChild, group);
-      }
-      group.remove();
-    });
-
-    return clone.textContent?.trim() || editedText;
-  }, [editedText]);
-
-  const handleCopy = async () => {
-    const textToCopy = extractCleanTextFromTrackedDOM();
-    if (!textToCopy.trim()) return;
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      alert('✅ Copied!');
-    } catch {
-      alert('Failed to copy.');
-    }
-  };
-
-  const handleDownload = () => {
-    const textToDownload = extractCleanTextFromTrackedDOM();
-    if (!textToDownload.trim()) return;
-    const blob = new Blob([textToDownload], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `edited-document-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleAcceptChange = useCallback(() => {}, []);
-  const handleRejectChange = useCallback(() => {}, []);
-
-  const handleSaveDocument = async () => {
-    const original = inputText;
-    const final = extractCleanTextFromTrackedDOM();
-    if (!original.trim() || !final.trim()) {
-      alert('No valid content to save. Please run “Edit” first.');
-      return;
-    }
-    const id = await saveDocument(final, original, documentName);
-    if (id) {
-      setDocumentId(id);
-      setDocumentName('');
-    }
-  };
-
-  const handleSaveProgress = async () => {
-    const original = inputText;
-    const final = extractCleanTextFromTrackedDOM();
-    if (!original.trim() || !final.trim() || !documentId) {
-      alert('No valid content or active document to update.');
-      return;
-    }
-    await saveProgress(documentId, final, original);
-  };
-
-  const handleDocumentClick = (doc: SavedDocument) => {
-    loadDocument(doc.id, {
-      originalText: doc.original_text,
-      editedText: doc.edited_text,
-      level: doc.level,
-      model: doc.model,
-      customInstruction: doc.custom_instruction,
-    });
-  };
-
-  const handleFileUpload = async (file: File) => {
-    if (!file) return;
-
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    setSelectedFile(file);
-
-    try {
-      let text = '';
-      const fileName = file.name.toLowerCase();
-
-      if (fileName.endsWith('.docx')) {
-        const arrayBuffer = await file.arrayBuffer();
-        const mammoth = await import('mammoth');
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        text = result.value;
-      } else if (fileName.endsWith('.doc')) {
-        alert('⚠️ Legacy .doc files have limited support. For best results, convert to .docx.');
-        const reader = new FileReader();
-        reader.readAsText(file);
-        await new Promise((resolve) => {
-          reader.onload = resolve;
-          reader.onerror = resolve;
-        });
-        text = reader.result as string;
-      } else {
-        alert('SupportedContent type. Please upload .docx or .doc files only.');
-        setSelectedFile(null);
-        return;
-      }
-
-      if (text.trim()) {
-        setInputText(text);
-        const cleanName = file.name
-          .replace(/\.[^/.]+$/, '')
-          .replace(/[^\w\s-]/g, '')
-          .trim()
-          .substring(0, 40) || 'New Document';
-        setDocumentName(cleanName);
-      } else {
-        alert('Could not extract readable text from the document.');
-      }
-    } catch (err) {
-      console.error('File parsing error:', err);
-      alert('Failed to read document. Please ensure it’s a valid Microsoft Word file.');
-    } finally {
-      setSelectedFile(null);
-    }
-  };
-
-  const triggerFileUpload = () => {
-    fileInputRef.current?.click();
-  };
-
-  // === ENHANCED applyEdit with large doc support ===
-  const applyEdit = async () => {
-    if (isLoading || isProcessingLargeDoc) return;
-    
-    const trimmedInput = inputText.trim();
-    if (!trimmedInput) {
-      alert('Please enter text to edit.');
-      return;
-    }
-    
-    // For very large documents, use the new job-based approach
-    const currentWordCount = trimmedInput.split(/\s+/).length;
-    const isVeryLarge = currentWordCount > 15000;
-    
-    setIsLoading(true);
-    setError(null);
-    setJobId(null);
-    setIsProcessingLargeDoc(isVeryLarge);
-    
-    try {
-      if (isVeryLarge) {
-        // Start large document processing job
-        const response = await fetch('/api/edit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input: trimmedInput,
-            instruction: editLevel === 'custom' ? customInstruction : undefined,
-            editLevel,
-            useEditorialBoard: false,
-            model: ALLOWED_MODELS[0], // Initial model
-          })
-        });
-        
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error || `Failed to start processing: ${response.status}`);
-        }
-        
-        const { jobId } = await response.json();
-        if (!jobId) {
-          throw new Error('Server did not return a job ID');
-        }
-        setJobId(jobId);
-        setProgress(0);
-        
-        // Start polling for job status
-        pollJobStatus(jobId);
-      } else {
-        // Use existing approach for smaller documents
-        await originalApplyEdit();
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      setError(errorMessage);
-      console.error('Edit failed:', errorMessage);
-      setIsLoading(false);
-      setIsProcessingLargeDoc(false);
-    }
-  };
-
-  // === Polling function for large doc jobs ===
-  const pollJobStatus = async (currentJobId: string) => {
-    try {
-      const response = await fetch('/api/edit/status', { // NOTE: changed endpoint
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: currentJobId })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Status check failed: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      if (result.status === 'processing') {
-        // Update progress
-        setProgress(Math.min(99, result.progress || 0));
-        
-        // Continue polling
-        largeDocTimeoutRef.current = setTimeout(() => {
-          pollJobStatus(currentJobId);
-        }, 2000);
-      } else if (result.status === 'completed') {
-        // Processing complete
-        if (largeDocTimeoutRef.current) clearTimeout(largeDocTimeoutRef.current);
-        
-        let finalResult;
-        try {
-          // Assume backend returns { editedText, trackedHtml, changes, usedModels }
-          finalResult = result;
-        } catch {
-          finalResult = { editedText: result.editedText, trackedHtml: null, changes: -1 };
-        }
-        
-        setEditedText(finalResult.editedText);
-        setChangeCount(finalResult.changes || 0);
-        setIsLoading(false);
-        setIsProcessingLargeDoc(false);
-        setJobId(null);
-        
-        const modelsUsed = result.usedModels?.join(', ') || 'multiple models';
-        alert(`✅ Editing complete using ${modelsUsed}`);
-      } else if (result.status === 'failed') {
-        if (largeDocTimeoutRef.current) clearTimeout(largeDocTimeoutRef.current);
-        setError(result.error || 'Processing failed');
-        setIsLoading(false);
-        setIsProcessingLargeDoc(false);
-        setJobId(null);
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error('Polling error:', errorMessage);
-      
-      // Retry with backoff
-      largeDocTimeoutRef.current = setTimeout(() => {
-        pollJobStatus(currentJobId);
-      }, 5000);
-    }
-  };
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (largeDocTimeoutRef.current) {
-        clearTimeout(largeDocTimeoutRef.current);
+    const checkClipboardSupport = async () => {
+      try {
+        const basicSupport = typeof navigator.clipboard !== 'undefined';
+        const execCommandSupport = document.queryCommandSupported?.('copy');
+        setClipboardSupported(basicSupport || !!execCommandSupport);
+      } catch (e) {
+        console.warn('Clipboard support check failed:', e);
+        setClipboardSupported(false);
       }
     };
+
+    checkClipboardSupport();
   }, []);
 
-  return (
-    <div className="editor-ui max-w-4xl mx-auto p-4 space-y-6 bg-white text-black min-h-screen">
-      
-      {/* === 1. Original Text === */}
-      <div>
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-semibold text-black">Original Text</h2>
-          <span className="text-sm text-gray-600">{wordCount} word{wordCount !== 1 ? 's' : ''}</span>
-        </div>
+  // Handle file upload
+  const handleFileUpload = async (file: File) => {
+    setUploadError(null);
+    
+    if (
+      file.type !== 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' &&
+      file.type !== 'application/msword'
+    ) {
+      setUploadError('Please upload a Word document (.doc or .docx)');
+      return;
+    }
 
-        <div className="mb-4 p-4 border-2 border-dashed rounded-xl border-blue-200 bg-blue-50/40 hover:border-blue-300 transition-colors">
-          <div className="flex flex-col items-center justify-center py-5 px-4 text-center">
-            <div className="mb-3 p-3 bg-blue-100 rounded-full">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <p className="text-sm font-medium text-gray-700 mb-1">Upload a Microsoft Word document</p>
-            <p className="text-xs text-gray-500 mb-3">.docx or .doc • Max 10MB</p>
-            <button
-              type="button"
-              onClick={triggerFileUpload}
-              className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="-ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              Browse Word Files
-            </button>
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const { default: mammoth } = await import('mammoth');
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      const text = result.value;
+      
+      setDocumentName(file.name.replace(/\.[^/.]+$/, ''));
+      setInputText(text);
+    } catch (error) {
+      console.error('Error processing Word document:', error);
+      setUploadError('Failed to process the document. Please try again.');
+    }
+  };
+
+  // Handle file input change
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      handleFileUpload(file);
+      // Reset input value to allow re-uploading same file
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Check if results are available
+  const hasResults = !isLoading && (resultClean || resultTracked);
+
+  return (
+    <div style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
+      <div style={containerStyle}>
+        <h1 style={headingStyle}>AI Editorial Board — Document Editor</h1>
+
+        {/* Input */}
+        <div style={sectionBase}>
+          <h3 style={{ marginTop: 0 }}>Input Text</h3>
+          
+          {/* File Upload Button */}
+          <div>
             <input
               type="file"
+              id="file-upload"
+              accept=".doc, .docx"
+              onChange={handleFileInputChange}
               ref={fileInputRef}
-              accept=".docx,.doc"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFileUpload(file);
-              }}
-              className="hidden"
+              style={{ display: 'none' }}
             />
+            <label 
+              htmlFor="file-upload" 
+              style={fileUploadButtonStyle}
+            >
+              📂 Upload Word Document
+            </label>
           </div>
-
-          {selectedFile && (
-            <div className="mt-3 flex items-center justify-center text-sm text-blue-600">
-              <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Processing {selectedFile.name}...
+          
+          {uploadError && (
+            <div style={statusStyle('error')}>
+              {uploadError}
             </div>
           )}
-        </div>
 
-        <textarea
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Paste your text here or upload a Word document above..."
-          rows={8}
-          className="w-full p-3 border border-gray-300 rounded-md font-mono text-sm text-black bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          disabled={isLoading || isProcessingLargeDoc}
-        />
-      </div>
-
-      {/* === 2. Editing Level === */}
-      <div>
-        <h3 className="font-medium mb-2 text-black">Editing Level</h3>
-        <div className="flex flex-wrap gap-2">
-          {(['proofread', 'rewrite', 'formal', 'custom'] as EditLevel[]).map((level) => (
-            <button
-              key={level}
-              className={`px-3 py-1 text-sm rounded-md ${
-                editLevel === level
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              }`}
-              onClick={() => setEditLevel(level)}
-            >
-              {level.charAt(0).toUpperCase() + level.slice(1)}
-            </button>
-          ))}
-        </div>
-        {editLevel === 'custom' && (
-          <input
-            type="text"
-            value={customInstruction}
-            onChange={(e) => setCustomInstruction(e.target.value)}
-            placeholder="Enter custom instruction..."
-            className="w-full mt-2 p-2 border border-gray-300 rounded text-sm text-black bg-white"
+          <textarea
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder="Paste your document here or upload a Word file..."
+            style={textareaStyle}
+            disabled={isLoading}
           />
-        )}
-      </div>
-
-      {/* === 3. ✨ Enhanced Edit Button === */}
-      <div>
-        <button
-          id="edit-btn"
-          onClick={applyEdit}
-          disabled={isLoading || isProcessingLargeDoc || !inputText.trim()}
-          className={`px-4 py-2 rounded-md font-medium ${
-            isLoading || isProcessingLargeDoc
-              ? 'bg-gray-400 cursor-not-allowed'
-              : inputText.trim()
-              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          {isProcessingLargeDoc ? (
-            <span className="flex items-center justify-center">
-              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Processing {progress}% ({Math.round(wordCount / 1000)}k words)
-            </span>
-          ) : isLoading ? (
-            '⏳ Processing...'
-          ) : (
-            '✨ Edit'
-          )}
-        </button>
-        
-        {jobId && (
-          <div className="mt-2 text-sm text-blue-600">
-            Job ID: {jobId.substring(0, 8)}... (processing large document)
-          </div>
-        )}
-        
-        {(error || docError) && (
-          <p className="mt-2 text-red-600 text-sm">{error || docError}</p>
-        )}
-        
-        {isProcessingLargeDoc && progress > 0 && (
-          <div className="mt-2">
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div 
-                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
-                style={{ width: `${progress}%` }}
-              ></div>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Processing with multiple free models ({progress}% complete)
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* === 4. Edited Result === */}
-      {(editedText || isLoading || isProcessingLargeDoc) && (
-        <div>
-          <div className="flex justify-between items-center mb-2">
-            <h2 className="text-lg font-semibold text-black">Edited Result</h2>
-            <div className="flex gap-2">
-              <button
-                id="copy-btn"
-                onClick={handleCopy}
-                className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
-              >
-                📋 Copy
-              </button>
-              <button
-                id="download-btn"
-                onClick={handleDownload}
-                className="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
-              >
-                💾 Download
-              </button>
-            </div>
-          </div>
-
-          <div className="flex mb-2">
-            <button
-              className={`px-3 py-1 text-sm ${
-                viewMode === 'clean'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              }`}
-              onClick={() => setViewMode('clean')}
-            >
-              Clean View
-            </button>
-            <button
-              className={`px-3 py-1 text-sm ml-1 ${
-                viewMode === 'tracked'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
-              }`}
-              onClick={() => setViewMode('tracked')}
-            >
-              Tracked Changes ({changeCount} change{changeCount !== 1 ? 's' : ''})
-            </button>
-          </div>
-
-          <div
-            ref={trackedRef}
-            className="min-h-[200px] p-3 border rounded-md bg-white font-mono text-sm text-black"
-            style={{ lineHeight: '1.5', whiteSpace: 'pre-wrap' }}
-          >
-            {viewMode === 'clean' ? (
-              editedText || 'Result will appear here...'
-            ) : (
-              <TrackedChangesView
-                key={documentId || 'new'}
-                originalText={inputText}
-                editedText={editedText}
-                onAcceptChange={handleAcceptChange}
-                onRejectChange={handleRejectChange}
-              />
+          <div style={{ fontSize: '12px', color: theme.textLight, marginTop: '4px' }}>
+            Word count: <span>{wordCount.toLocaleString()} word{wordCount !== 1 ? 's' : ''}</span>
+            {wordCount > 1000 && (
+              <span style={{ color: theme.warning, marginLeft: '8px' }}>
+                Large document processing may take longer
+              </span>
             )}
           </div>
         </div>
-      )}
 
-      {!editedText && !isLoading && !isProcessingLargeDoc && (
-        <div className="p-3 bg-gray-50 border rounded text-gray-500 text-sm">
-          Result will appear here after you click “Edit”.
-        </div>
-      )}
-
-      {/* === 5. Document Management (auto-shows after edit) === */}
-      <div className="border-t border-gray-300 pt-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-black">Document Management</h2>
-          <button
-            onClick={() => setShowDocuments(!showDocuments)}
-            className="text-sm text-blue-600"
-          >
-            {showDocuments ? '↑ Hide' : '↓ Show'}
-          </button>
-        </div>
-
-        {showDocuments && (
-          <div id="documents-panel" className="mt-2 p-4 bg-gray-50 rounded border border-gray-200">
-            <input
-              id="document-name"
-              type="text"
-              value={documentName}
-              onChange={(e) => setDocumentName(e.target.value)}
-              placeholder="Document name..."
-              className="w-full p-2 border border-gray-300 rounded text-sm mb-2 text-black bg-white"
+        {/* Edit Level */}
+        <div style={sectionBase}>
+          <h3 style={{ marginTop: 0 }}>Edit Level</h3>
+          <div style={{ marginBottom: '10px' }}>
+            {(['proofread', 'rewrite', 'formal', 'custom'] as const).map((level) => (
+              <span
+                key={level}
+                style={levelOption(editLevel === level)}
+                onClick={() => setEditLevel(level)}
+              >
+                {level.charAt(0).toUpperCase() + level.slice(1)}
+              </span>
+            ))}
+          </div>
+          {editLevel === 'custom' && (
+            <textarea
+              value={customInstruction}
+              onChange={(e) => setCustomInstruction(e.target.value)}
+              placeholder="Enter your custom instruction..."
+              style={{ ...textareaStyle, marginTop: '8px' }}
             />
-            <div className="flex gap-2">
-              <button
-                id="save-document-btn"
-                onClick={handleSaveDocument}
-                disabled={isLoading || isProcessingLargeDoc || isDocLoading || !editedText}
-                className="flex-1 px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-400"
-              >
-                💾 Save Document
-              </button>
-              <button
-                id="save-progress-btn"
-                onClick={handleSaveProgress}
-                disabled={!documentId || isLoading || isProcessingLargeDoc || isDocLoading || !editedText}
-                className="flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-400"
-              >
-                🔄 Save Progress
-              </button>
-            </div>
+          )}
+        </div>
 
-            <div className="mt-4">
-              <h3 className="font-medium mb-2 text-black">Saved Documents</h3>
-              <div id="documents-list" className="space-y-2 max-h-60 overflow-y-auto">
-                {documents.length === 0 ? (
-                  <div className="text-gray-500 text-sm">No saved documents yet</div>
-                ) : (
-                  documents.map((doc) => {
-                    const date = new Date(doc.created_at);
-                    const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        {/* Actions */}
+        <div style={sectionBase}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button 
+              onClick={handleApplyEdit} 
+              style={{ 
+                ...buttonBase, 
+                opacity: isLoading ? 0.7 : 1,
+                cursor: isLoading ? 'not-allowed' : 'pointer'
+              }}
+              disabled={isLoading}
+            >
+              {isLoading ? '⏳ Processing...' : '✨ Apply Edit'}
+            </button>
+          </div>
+          
+          {status.show && <div style={statusStyle(status.type)}>{status.message}</div>}
+          
+          {/* Large Document Progress */}
+          {isLoading && wordCount > 1000 && progressMetrics && (
+            <div style={{ marginTop: '15px' }}>
+              <div style={progressBarContainer}>
+                <div style={progressBarFill(progressMetrics.progress, progressMetrics.chunksProcessed === progressMetrics.totalChunks)}>
+                  {progressMetrics.progress}%
+                </div>
+              </div>
+              
+              <div style={chunkStatusStyle}>
+                <span>Elapsed: {progressMetrics.timeElapsed}s</span>
+                <span>Est. remaining: {progressMetrics.estimatedRemaining}s</span>
+              </div>
+              
+              <div style={{ marginTop: '10px', maxHeight: '100px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                  {chunks.map((chunk, index) => {
+                    const isCurrent = index === currentChunkIndex;
+                    const isProcessed = index < currentChunkIndex;
+                    const chunkWords = chunk.trim().split(/\s+/).filter(Boolean).length;
+                    
                     return (
-                      <div
-                        key={doc.id}
-                        className={`p-2 border rounded cursor-pointer ${
-                          doc.id === documentId
-                            ? 'border-green-500 bg-green-50'
-                            : 'border-gray-300 hover:bg-gray-100'
-                        }`}
-                        onClick={() => handleDocumentClick(doc)}
+                      <div 
+                        key={index} 
+                        title={`Chunk ${index + 1}: ${chunkWords} words`}
+                        style={chunkItemStyle(isCurrent)}
                       >
-                        <div className="flex justify-between items-start">
-                          <div className="font-medium text-sm text-black">{doc.name}</div>
-                          <div className="text-xs text-gray-500">{formattedDate}</div>
-                        </div>
-                        <div className="flex justify-end gap-1 mt-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDocumentClick(doc);
-                            }}
-                            className="text-xs text-blue-600"
-                          >
-                            ↩️
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (confirm('Delete this document?')) deleteDocument(doc.id);
-                            }}
-                            className="text-xs text-red-600"
-                          >
-                            ×
-                          </button>
-                        </div>
+                        {isProcessed ? '✓' : isCurrent ? '🕗' : index + 1}
                       </div>
                     );
-                  })
-                )}
+                  })}
+                </div>
               </div>
             </div>
+          )}
+        </div>
+
+        {/* Results */}
+        <div style={sectionBase}>
+          <h3 style={{ marginTop: 0 }}>Edited Output</h3>
+          
+          {hasResults && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* View toggles + Copy button inline */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                <button
+                  style={toggleView(activeView === 'clean')}
+                  onClick={() => setActiveView('clean')}
+                  disabled={isLoading}
+                >
+                  Clean View
+                </button>
+                <button
+                  style={toggleView(activeView === 'tracked')}
+                  onClick={() => setActiveView('tracked')}
+                  disabled={isLoading}
+                >
+                  Tracked Changes
+                </button>
+
+                {/* Copy button right after Tracked Changes */}
+                <button 
+                  onClick={handleCopy} 
+                  style={{ 
+                    ...buttonBase, 
+                    backgroundColor: theme.secondary,
+                    opacity: clipboardSupported ? 1 : 0.6,
+                    cursor: clipboardSupported && !isLoading ? 'pointer' : 'not-allowed',
+                    fontSize: '14px',
+                    padding: '6px 12px',
+                    minWidth: 'max-content',
+                  }}
+                  disabled={!clipboardSupported || isLoading}
+                  title={!clipboardSupported ? 'Clipboard API not supported in your browser' : activeView === 'tracked' ? 'Copy with tracked changes formatting for Word' : 'Copy clean text'}
+                >
+                  📋 Copy{activeView === 'tracked' ? ' with formatting' : ''}
+                </button>
+              </div>
+            </div>
+          )}
+          
+          <div style={{ ...resultBox, display: activeView === 'clean' ? 'block' : 'none' }}>
+            {isLoading && wordCount > 1000 ? (
+              <div style={{ color: theme.textLight, fontStyle: 'italic' }}>
+                Processing document... Results will appear below
+              </div>
+            ) : resultClean}
+          </div>
+          <div
+            style={{ ...resultBox, display: activeView === 'tracked' ? 'block' : 'none' }}
+            dangerouslySetInnerHTML={{ 
+              __html: isLoading && wordCount > 1000
+                ? '<div style="color: #666; font-style: italic;">Processing document... Tracked changes will appear below</div>'
+                : resultTracked
+            }}
+          />
+          {!isLoading && hasResults && (
+            <div style={{ marginTop: '8px', fontWeight: 'bold', color: changesCount > 0 ? theme.primary : theme.textLight }}>
+              {changesCount.toLocaleString()} change{changesCount !== 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+
+        {/* Documents Panel */}
+        <div style={sectionBase}>
+          <input
+            type="text"
+            value={documentName}
+            onChange={(e) => setDocumentName(e.target.value)}
+            placeholder="Document name (optional)"
+            style={inputStyle}
+            disabled={isLoading}
+          />
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '8px' }}>
+            {hasResults && (
+              <>
+                <button 
+                  onClick={handleSaveNew} 
+                  style={{ 
+                    ...buttonBase, 
+                    backgroundColor: theme.success,
+                  }}
+                >
+                  💾 Save New Document
+                </button>
+                {currentDocumentId && (
+                  <button 
+                    onClick={handleSaveProgress} 
+                    style={{ 
+                      ...buttonBase, 
+                      backgroundColor: theme.warning,
+                    }}
+                  >
+                    🔁 Save Progress
+                  </button>
+                )}
+              </>
+            )}
+            <button 
+              onClick={toggleDocuments} 
+              style={{ 
+                ...buttonBase, 
+                backgroundColor: showDocuments ? theme.danger : theme.info,
+              }}
+            >
+              {showDocuments ? '↑ Hide Documents' : '↓ Show Documents'}
+            </button>
+          </div>
+        </div>
+
+        {/* Saved Documents */}
+        {showDocuments && (
+          <div style={{ ...sectionBase, marginTop: '20px' }}>
+            <h3 style={{ marginTop: 0 }}>Saved Documents</h3>
+            {savedDocuments.length === 0 ? (
+              <div
+                style={{
+                  textAlign: 'center',
+                  color: theme.textLight,
+                  padding: '15px',
+                  fontStyle: 'italic',
+                  border: `1px dashed ${theme.border}`,
+                  borderRadius: '4px',
+                }}
+              >
+                No saved documents yet
+              </div>
+            ) : (
+              <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                {savedDocuments.map((doc: SavedDocument) => (
+                  <div 
+                    key={doc.id} 
+                    style={{
+                      ...documentItemStyle,
+                      borderLeft: doc.id === currentDocumentId ? `4px solid ${theme.primary}` : 'none',
+                      paddingLeft: doc.id === currentDocumentId ? '6px' : '10px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        marginBottom: '5px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontWeight: 'bold',
+                          fontSize: '14px',
+                          flex: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => loadDocument(doc)}
+                        title={`Load: ${doc.name}`}
+                      >
+                        {doc.name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: theme.textLight, flexShrink: 0 }}>
+                        {new Date(doc.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                      <button
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '50%',
+                          border: `1px solid ${theme.border}`,
+                          background: 'white',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: theme.secondary,
+                          transition: 'all 0.2s',
+                        }}
+                        title="Open document"
+                        onClick={() => loadDocument(doc)}
+                      >
+                        ↗
+                      </button>
+                      <button
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '50%',
+                          border: `1px solid ${theme.border}`,
+                          background: 'white',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: theme.danger,
+                          transition: 'all 0.2s',
+                        }}
+                        title="Delete document"
+                        onClick={() => deleteDocument(doc.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
   );
-}
+};
+
+export default EditorUI;

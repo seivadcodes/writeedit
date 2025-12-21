@@ -1,5 +1,5 @@
 // /app/editor/page.tsx
-import { EditorUI } from '@/components/EditorUI';
+import EditorUI from '@/components/EditorUI';
 import { PageWithChrome } from '@/components/PageWithChrome';
 
 export const metadata = {

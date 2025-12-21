@@ -1,208 +1,211 @@
 // app/api/edit/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { splitIntoChunks } from '@/lib/chunking';
-import { getSystemPrompt } from '@/lib/ai';
 
-const ALLOWED_MODELS = [
+// ✅ Centralized model list — edit ONLY this array to add/remove models
+const FREE_MODELS = [
   'mistralai/devstral-2512:free',
   'kwaipilot/kat-coder-pro:free',
+  'google/gemini-flash-1.5-8b:free',
   'anthropic/claude-3.5-sonnet:free',
-  'google/gemini-flash-1.5-8b:free'
+  'nousresearch/hermes-3-llama-3.1-405b:free',
+  'meta-llama/llama-3.2-90b-vision-instruct:free',
+  'deepseek/deepseek-r1-0528:free',
+  'tngtech/deepseek-r1t2-chimera:free',
 ];
 
-async function callModelWithTemp(
-  text: string,
-  instruction: string,
-  model: string,
-  editLevel: string,
-  apiKey: string,
-  temperature: number,
-  useEditorialBoard: boolean
-): Promise<string> {
-  if (useEditorialBoard) {
-    return runSelfRefinementLoop(text, instruction, model, apiKey, temperature);
-  }
-  const system = getSystemPrompt(editLevel as any, instruction);
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://beforepublishing.vercel.app',
-      'X-Title': 'Before Publishing'
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: text }
-      ],
-      max_tokens: 1000,
-      temperature,
-      top_p: temperature > 0.8 ? 0.95 : 0.9
-    })
-  });
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+  const { input, instruction, editLevel, numVariations = 1 } = body;
 
-  if (!res.ok) {
-    const errJson = await res.json().catch(() => ({}));
-    const errorMsg = errJson?.error?.message || `HTTP ${res.status}: ${res.statusText}`;
-    throw new Error(errorMsg);
+  if (!instruction || !editLevel) {
+    return NextResponse.json(
+      { error: 'Missing instruction or editLevel' },
+      { status: 400 }
+    );
   }
 
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error('Model returned empty content');
-  }
-  return content;
-}
+  const variations = Math.min(Math.max(parseInt(numVariations as any, 10) || 1, 1), 5);
 
-async function runSelfRefinementLoop(
-  original: string,
-  instruction: string,
-  model: string,
-  apiKey: string,
-  baseTemp: number
-): Promise<string> {
-  let current = await callModelWithTemp(original, instruction, model, 'custom', apiKey, baseTemp, false);
-  const prompt2 = `Original: "${original}"\nYour edit: "${current}"\nReview your work. Fix errors. Return ONLY improved text.`;
-  current = await callModelWithTemp(prompt2, 'Self-review', model, 'custom', apiKey, Math.min(1.0, baseTemp + 0.1), false);
-  const prompt3 = `Original: "${original}"\nCurrent: "${current}"\nFinal check. Return ONLY final text.`;
-  current = await callModelWithTemp(prompt3, 'Final polish', model, 'custom', apiKey, Math.min(1.0, baseTemp + 0.2), false);
-  return current;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-function generateTrackedChanges(original: string, edited: string): { html: string; changes: number } {
-  const words1 = original.split(/\s+/);
-  const words2 = edited.split(/\s+/);
-  const html: string[] = [];
-  let i = 0, j = 0;
-  let changes = 0;
-
-  while (i < words1.length || j < words2.length) {
-    if (i < words1.length && j < words2.length && words1[i] === words2[j]) {
-      html.push(escapeHtml(words1[i]));
-      i++;
-      j++;
-    } else {
-      const startI = i;
-      const startJ = j;
-      while (
-        (i < words1.length && j < words2.length && words1[i] !== words2[j]) ||
-        (i < words1.length && j >= words2.length) ||
-        (i >= words1.length && j < words2.length)
-      ) {
-        if (i < words1.length) i++;
-        if (j < words2.length) j++;
-      }
-      const deleted = words1.slice(startI, i).map(escapeHtml).join(' ');
-      const inserted = words2.slice(startJ, j).map(escapeHtml).join(' ');
-      if (deleted || inserted) {
-        changes++;
-        let group = '';
-        if (deleted) group += `<del>${deleted}</del>`;
-        if (inserted) group += `<ins>${inserted}</ins>`;
-        html.push(`<span class="change-group">${group}</span>`);
-      }
-    }
+  const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+  if (!OPENROUTER_API_KEY) {
+    console.error('❌ Missing OPENROUTER_API_KEY');
+    return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
   }
 
-  return {
-    html: `<div style="white-space: pre-wrap;">${html.join(' ')}</div>`,
-    changes
-  };
+  const VALID_MODELS = FREE_MODELS.filter(m => typeof m === 'string' && m.endsWith(':free'));
+
+  if (VALID_MODELS.length === 0) {
+    return NextResponse.json(
+      { error: 'No valid free models configured' },
+      { status: 500 }
+    );
+  }
+
+  let systemPrompt = '';
+  if (editLevel === 'proofread') {
+    systemPrompt = `You are a meticulous proofreader. Fix ONLY the following:
+- Spelling errors (e.g., "recieve" → "receive")
+- Grammar mistakes (subject-verb agreement, incorrect verb tense, missing articles)
+- Punctuation (add missing periods, commas, fix quotation marks)
+- Capitalization (sentence starts and proper nouns)
+NEVER:
+- Rephrase sentences
+- Change word choice (even if awkward or informal)
+- Alter tone, voice, or style
+- Add, remove, or reorder ideas
+Return ONLY the corrected text — nothing else.`;
+  } else if (editLevel === 'rewrite') {
+    systemPrompt = `You are an expert editor. Improve clarity, flow, and readability while:
+- Preserving the original meaning exactly
+- Keeping the same tone (e.g., casual, academic, persuasive)
+- Fixing awkward or ambiguous phrasing
+- Avoiding unnecessary wordiness
+Do NOT:
+- Invent new facts, examples, or details
+- Change the author’s intent or core message
+- Use overly formal language unless the original is formal
+Return ONLY the improved text — nothing else.`;
+  } else if (editLevel === 'formal') {
+    systemPrompt = `You are a professional editor. Convert this text to formal, polished English by:
+- Replacing all contractions ("don't" → "do not", "it's" → "it is")
+- Removing slang, idioms, and colloquial expressions
+- Using precise, objective, and grammatically complete sentences
+- Maintaining all original facts and meaning
+Do NOT:
+- Add filler phrases like "It is important to note that..."
+- Simplify or omit technical or nuanced content
+- Change the core message or intent
+Return ONLY the formal version — nothing else.`;
+  } else if (editLevel === 'generate') {
+    systemPrompt = `You are a skilled blog writer. Generate a complete, engaging, and well-structured blog post based on the user's instruction. 
+Include:
+- A compelling title
+- A short excerpt (1–2 sentences)
+- A full body with paragraphs, examples, and a natural tone
+- No markdown, just plain text
+- Do NOT include any disclaimers like "Here is a blog post..." or "As an AI..."
+Return ONLY the following JSON object, with no additional text before or after:
+{
+  "title": "Generated Title",
+  "excerpt": "Brief summary...",
+  "content": "Full blog content here..."
 }
+DO NOT ADD ANYTHING ELSE. NO EXPLANATIONS. NO MARKDOWN. JUST THE JSON.`;
+  } else {
+    systemPrompt = `You are an expert editor. Follow the user's instruction precisely while maintaining the core meaning and intent of the original text. Return ONLY the edited text — nothing else.`;
+  }
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const {
-      input,
-      instruction,
-      model: preferredModel,
-      editLevel,
-      useEditorialBoard = false,
-    } = body;
+  const userPrompt = `Instruction: "${instruction}"${input ? `\nText: "${input}"` : ''}`;
 
-    if (!instruction?.trim()) {
-      return NextResponse.json({ error: 'Instruction required' }, { status: 400 });
-    }
-    if (editLevel !== 'generate' && !input?.trim()) {
-      return NextResponse.json({ error: 'Input required' }, { status: 400 });
-    }
-
-    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    if (!OPENROUTER_API_KEY) {
-      return NextResponse.json({ error: 'Missing OPENROUTER_API_KEY' }, { status: 500 });
-    }
-
-    const wordCount = input.trim().split(/\s+/).length;
-    let editedText: string;
-
-    if (wordCount >= 1000) {
-      // ✅ PARALLEL LARGE-DOC EDITING ACROSS ALL FREE MODELS
-      const chunks = splitIntoChunks(input);
-      const chunkPromises = chunks.map(async (chunk, index) => {
-        const model = ALLOWED_MODELS[index % ALLOWED_MODELS.length]; // round-robin
-        try {
-          if (useEditorialBoard) {
-            return await runSelfRefinementLoop(chunk, instruction, model, OPENROUTER_API_KEY, 0.7);
-          } else {
-            return await callModelWithTemp(chunk, instruction, model, editLevel, OPENROUTER_API_KEY, 0.7, false);
-          }
-        } catch (err) {
-          console.warn(`Chunk ${index} failed on ${model}:`, (err as Error)?.message || err);
-          return chunk; // fallback: keep original if edit fails
-        }
-      });
-
-      const editedChunks = await Promise.all(chunkPromises);
-      editedText = editedChunks.join('\n\n');
-    } else {
-      // Small doc: use preferred or fallback model
-      const modelsToTry = [preferredModel, ...ALLOWED_MODELS.filter(m => m !== preferredModel)];
-      let success = false;
-      let tempEdited = '';
-
-      for (const model of modelsToTry) {
-        try {
-          if (useEditorialBoard) {
-            tempEdited = await runSelfRefinementLoop(input, instruction, model, OPENROUTER_API_KEY, 0.7);
-          } else {
-            tempEdited = await callModelWithTemp(input, instruction, model, editLevel, OPENROUTER_API_KEY, 0.7, false);
-          }
-          success = true;
-          break;
-        } catch (err) {
-          console.warn(`Model ${model} failed:`, (err as Error)?.message || err);
-        }
-      }
-
-      if (!success) {
-        throw new Error('All models failed for small document');
-      }
-      editedText = tempEdited;
-    }
-
-    const { html: trackedHtml, changes } = generateTrackedChanges(input || '', editedText);
-
-    return NextResponse.json({
-      editedText,
-      trackedHtml,
-      changes,
-      usedModel: 'parallel-free-models'
+  async function makeCompletionWithModel(useModel: string, temp: number) {
+    const origin = (request.headers.get('origin') || 'https://beforepublishing.vercel.app').trim();
+    const apiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': origin,
+        'X-Title': 'Before Publishing',
+      },
+      body: JSON.stringify({
+        model: useModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: editLevel === 'generate' ? 1200 : 800,
+        temperature: temp,
+      }),
     });
 
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error('❌ Edit API error:', errorMessage);
-    return NextResponse.json({ error: errorMessage || 'Internal server error' }, { status: 500 });
+    if (!apiRes.ok) {
+      const errData = await apiRes.json().catch(() => ({}));
+      const msg = errData.error?.message || apiRes.statusText;
+      throw new Error(`HTTP ${apiRes.status}: ${msg}`);
+    }
+
+    const data = await apiRes.json();
+    const content = data.choices?.[0]?.message?.content?.trim() || '';
+    if (!content) throw new Error('Empty response from model');
+    return content;
   }
+
+  async function tryModelsUntilSuccess(models: string[], temp: number) {
+    let lastError: Error | null = null;
+    for (const model of models) {
+      try {
+        const output = await makeCompletionWithModel(model, temp);
+        console.log(`✅ Success with model: ${model}`);
+        return { output, model };
+      } catch (err) {
+        console.warn(`❌ Model ${model} failed:`, (err as Error).message);
+        lastError = err as Error;
+      }
+    }
+    throw lastError || new Error('All models failed');
+  }
+
+  try {
+    if (editLevel === 'generate') {
+      const { output: rawOutput, model: usedModel } = await tryModelsUntilSuccess(VALID_MODELS, 0.9);
+      console.log(`📝 Used model for generate: ${usedModel}`);
+
+      const extractJson = (str: string) => {
+        if (!str) return null;
+        let start = str.indexOf('{');
+        let end = str.lastIndexOf('}');
+        if (start === -1 || end === -1 || end <= start) return null;
+        let jsonStr = str.slice(start, end + 1);
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (parsed && typeof parsed === 'object') {
+            return parsed;
+          }
+        } catch (e) {
+          console.warn('JSON parse error:', (e as Error).message);
+        }
+        return null;
+      };
+
+      let parsed = extractJson(rawOutput);
+      if (!parsed || !parsed.title || !parsed.content) {
+        console.warn('AI JSON fallback triggered. Raw:', rawOutput.substring(0, 300));
+        parsed = {
+          title: "AI-Generated Blog Post",
+          excerpt: "Generated by AI. Please review before publishing.",
+          content: rawOutput || "No content generated."
+        };
+      }
+
+      return NextResponse.json({ generatedPost: parsed });
+    } else {
+      if (variations === 1) {
+        const { output, model: usedModel } = await tryModelsUntilSuccess(VALID_MODELS, 0.7);
+        console.log(`📝 Used model for edit: ${usedModel}`);
+        return NextResponse.json({ editedText: output });
+      } else {
+        const { model: workingModel } = await tryModelsUntilSuccess(VALID_MODELS, 0.7);
+        const temps = [0.6, 0.7, 0.8, 0.9, 1.0].slice(0, variations);
+        const promises = temps.map(temp =>
+          makeCompletionWithModel(workingModel, temp).catch(err => {
+            console.warn(`Variation failed (model=${workingModel}):`, (err as Error).message);
+            return null;
+          })
+        );
+        const results = (await Promise.all(promises)).filter(r => r) as string[];
+        if (results.length === 0) results.push(input || 'No alternative available.');
+        return NextResponse.json({ variations: results });
+      }
+    }
+  } catch (err) {
+    console.error('Server error in /api/edit:', err);
+    return NextResponse.json(
+      { error: 'Internal server error', details: (err as Error).message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({ error: 'POST only' }, { status: 405 });
 }

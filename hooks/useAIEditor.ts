@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { diffWords } from 'diff';
 import { chunkText } from '@/lib/chunking';
 import { useSavedDocuments, SavedDocument } from './useSavedDocuments';
@@ -9,7 +9,6 @@ export type EditLevel = 'proofread' | 'rewrite' | 'formal' | 'custom';
 export type ViewMode = 'clean' | 'tracked';
 export type StatusType = 'success' | 'warning' | 'error' | 'info';
 
-// Helper: Generate HTML with <ins>/<del> and count changes
 const generateDiffHtml = (oldStr: string, newStr: string) => {
   const diff = diffWords(oldStr, newStr, { ignoreCase: false });
   let html = '';
@@ -36,7 +35,6 @@ export const useAIEditor = () => {
     currentDocumentId,
     saveDocument,
     saveProgressToCurrentDocument,
-    autoSaveProgress,
     setCurrentDocument,
     deleteDocument,
   } = useSavedDocuments();
@@ -69,56 +67,25 @@ export const useAIEditor = () => {
   const [chunkStartTime, setChunkStartTime] = useState<number | null>(null);
   const [processingStartTime, setProcessingStartTime] = useState<number | null>(null);
 
-  // Track the original text used for diffing
-  const [lastOriginalText, setLastOriginalText] = useState('');
-
-  // Refs to avoid stale closures in async operations
-  const currentDocumentIdRef = useRef<string | null>(currentDocumentId);
-  const inputTextRef = useRef(inputText);
-  const resultCleanRef = useRef(resultClean);
-  const editLevelRef = useRef(editLevel);
-  const customInstructionRef = useRef(customInstruction);
-  const documentNameRef = useRef(documentName);
-
-  // Update refs when state changes
-  useEffect(() => {
-    currentDocumentIdRef.current = currentDocumentId;
-    inputTextRef.current = inputText;
-    resultCleanRef.current = resultClean;
-    editLevelRef.current = editLevel;
-    customInstructionRef.current = customInstruction;
-    documentNameRef.current = documentName;
-  }, [
-    currentDocumentId,
-    inputText,
-    resultClean,
-    editLevel,
-    customInstruction,
-    documentName,
-  ]);
-
-  // Word count effect
   useEffect(() => {
     const words = inputText.trim() ? inputText.trim().split(/\s+/).filter(Boolean).length : 0;
     setWordCount(words);
   }, [inputText]);
 
-  // Get instruction based on edit level — STRICTLY ENFORCED
-  const getInstruction = useCallback(() => {
+  const getInstruction = () => {
     const baseRules = 'Return ONLY the edited text. Do not include any explanations, introductions, summaries, labels (like "Improved Text:" or "Edited Version:"), markdown, or additional commentary. Do not wrap in quotes. Do not apologize. Just return the final edited content verbatim.';
 
-    if (editLevelRef.current === 'proofread') {
+    if (editLevel === 'proofread') {
       return `Fix ONLY spelling, grammar, punctuation, and capitalization. Do not rephrase, reword, or change style, tone, or meaning. ${baseRules}`;
-    } else if (editLevelRef.current === 'rewrite') {
+    } else if (editLevel === 'rewrite') {
       return `Improve clarity, flow, and readability while preserving the original meaning and tone. Do not add new ideas or remove key points. ${baseRules}`;
-    } else if (editLevelRef.current === 'formal') {
+    } else if (editLevel === 'formal') {
       return `Convert to formal, professional English: remove contractions, slang, casual phrasing, and emotional language. Use precise vocabulary and complete sentences. ${baseRules}`;
     } else {
-      return `${customInstructionRef.current.trim() || 'Edit the text as requested.'} ${baseRules}`;
+      return `${customInstruction.trim() || 'Edit the text as requested.'} ${baseRules}`;
     }
-  }, []);
+  };
 
-  // Process a single chunk — NO CLEANING
   const processChunk = async (chunk: string, index: number): Promise<string> => {
     try {
       const res = await fetch('/api/edit', {
@@ -128,7 +95,7 @@ export const useAIEditor = () => {
           input: chunk,
           instruction: getInstruction(),
           model: 'x-ai/grok-4.1-fast:free',
-          editLevel: editLevelRef.current,
+          editLevel,
           numVariations: 1,
         }),
       });
@@ -148,43 +115,8 @@ export const useAIEditor = () => {
     }
   };
 
-  // Auto-save current progress based on document state
-  const autoSaveCurrentProgress = useCallback(() => {
-    const currentId = currentDocumentIdRef.current;
-    const currentInput = inputTextRef.current;
-    const currentResult = resultCleanRef.current;
-    
-    if (!currentInput.trim() || !currentResult.trim()) return;
-    
-    if (currentId) {
-      // Update existing document
-      autoSaveProgress({
-        originalText: currentInput,
-        editedText: currentResult,
-      });
-    } else {
-      // Create new auto-saved document
-      const name = documentNameRef.current.trim() || `Auto-saved ${new Date().toLocaleString()}`;
-      const id = saveDocument({
-        name,
-        originalText: currentInput,
-        editedText: currentResult,
-        level: editLevelRef.current,
-        model: 'x-ai/grok-4.1-fast:free',
-        customInstruction: editLevelRef.current === 'custom' ? customInstructionRef.current : '',
-      });
-      
-      if (id) {
-        setCurrentDocument(id);
-        currentDocumentIdRef.current = id;
-        showStatus('success', 'Document auto-saved!', 2000);
-      }
-    }
-  }, [autoSaveProgress, saveDocument, setCurrentDocument]);
-
-  // Process large document in chunks
   const processLargeDocument = async () => {
-    const chunksArray = chunkText(inputTextRef.current, 500, 100);
+    const chunksArray = chunkText(inputText, 500, 100);
     setChunks(chunksArray);
     setChunkResults(new Array(chunksArray.length).fill(''));
     setChunkStartTime(Date.now());
@@ -196,13 +128,12 @@ export const useAIEditor = () => {
 
     for (let i = 0; i < chunksArray.length; i++) {
       setCurrentChunkIndex(i);
-      showStatus('info', `Processing chunk ${i + 1} of ${chunksArray.length}...`, 0);
+      
 
       const editedChunk = await processChunk(chunksArray[i], i);
       
       fullClean += (fullClean ? '\n\n' : '') + editedChunk;
       setResultClean(fullClean);
-      resultCleanRef.current = fullClean;
       
       const diffResult = generateDiffHtml(chunksArray[i], editedChunk);
       fullTracked += (fullTracked ? '<div style="margin: 15px 0; border-top: 1px dashed #ccc;"></div>' : '') + diffResult.html;
@@ -215,36 +146,34 @@ export const useAIEditor = () => {
         newResults[i] = editedChunk;
         return newResults;
       });
-
-      // Auto-save every 3 chunks and at the end
-      if (i % 3 === 0 || i === chunksArray.length - 1) {
-        autoSaveCurrentProgress();
-      }
     }
 
-    setLastOriginalText(inputTextRef.current);
     return { fullClean, fullTracked, totalChanges };
   };
 
   const handleApplyEdit = async () => {
-    if (!inputTextRef.current.trim()) {
+    if (!inputText.trim()) {
       showStatus('warning', 'Enter text first');
       return;
     }
 
     setIsLoading(true);
-    showStatus('info', 'Starting edit process...', 0);
+    
 
     try {
+      let finalClean = '';
+      let finalTracked = '';
+      let finalChanges = 0;
+
       if (wordCount <= 1000) {
         const res = await fetch('/api/edit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            input: inputTextRef.current,
+            input: inputText,
             instruction: getInstruction(),
             model: 'x-ai/grok-4.1-fast:free',
-            editLevel: editLevelRef.current,
+            editLevel,
             numVariations: 1,
           }),
         });
@@ -258,30 +187,31 @@ export const useAIEditor = () => {
         const editedText =
           data.editedText !== undefined && data.editedText !== null
             ? data.editedText
-            : inputTextRef.current;
+            : inputText;
 
-        const diffResult = generateDiffHtml(inputTextRef.current, editedText);
+        const diffResult = generateDiffHtml(inputText, editedText);
 
+        finalClean = editedText;
+        finalTracked = diffResult.html;
+        finalChanges = diffResult.changes;
         setResultClean(editedText);
-        resultCleanRef.current = editedText;
         setResultTracked(diffResult.html);
         setChangesCount(diffResult.changes);
-        setLastOriginalText(inputTextRef.current);
 
-        // Auto-save small document immediately
-        autoSaveCurrentProgress();
         showStatus('success', 'Edit applied successfully!', 3000);
       } else {
         const { fullClean, fullTracked, totalChanges } = await processLargeDocument();
+        finalClean = fullClean;
+        finalTracked = fullTracked;
+        finalChanges = totalChanges;
         
         setResultClean(fullClean);
-        resultCleanRef.current = fullClean;
         setResultTracked(fullTracked);
         setChangesCount(totalChanges);
-        setLastOriginalText(inputTextRef.current);
 
         showStatus('success', 'Large document edited successfully!', 3000);
       }
+
     } catch (err: any) {
       console.error('[AI Editor] 🔥 Edit error:', err);
       showStatus('error', `Processing failed: ${err.message || 'Unknown error'}`, 5000);
@@ -372,34 +302,33 @@ export const useAIEditor = () => {
   };
 
   const handleSaveNew = () => {
-    if (!inputTextRef.current.trim() || !resultCleanRef.current.trim()) {
+    if (!inputText.trim() || !resultClean.trim()) {
       showStatus('warning', 'Enter and edit text first');
       return;
     }
-    const name = documentNameRef.current.trim() || `Document ${savedDocuments.length + 1}`;
+    const name = documentName.trim() || `Document ${savedDocuments.length + 1}`;
     const id = saveDocument({
       name,
-      originalText: inputTextRef.current,
-      editedText: resultCleanRef.current,
-      level: editLevelRef.current,
+      originalText: inputText,
+      editedText: resultClean,
+      level: editLevel,
       model: 'x-ai/grok-4.1-fast:free',
-      customInstruction: editLevelRef.current === 'custom' ? customInstructionRef.current : '',
+      customInstruction: editLevel === 'custom' ? customInstruction : '',
     });
     if (id) {
       setCurrentDocument(id);
-      currentDocumentIdRef.current = id;
       showStatus('success', 'Document saved!', 2000);
     }
   };
 
   const handleSaveProgress = () => {
-    if (!currentDocumentIdRef.current) {
+    if (!currentDocumentId) {
       showStatus('warning', 'No document loaded to update');
       return;
     }
     const success = saveProgressToCurrentDocument({
-      originalText: inputTextRef.current,
-      editedText: resultCleanRef.current,
+      originalText: inputText,
+      editedText: resultClean,
     });
     if (success) {
       showStatus('success', 'Progress saved!', 2000);
@@ -417,9 +346,6 @@ export const useAIEditor = () => {
     setResultClean(doc.editedText || doc.originalText);
     setDocumentName(doc.name);
     setCurrentDocument(doc.id);
-    currentDocumentIdRef.current = doc.id;
-    
-    // Re-run diff to update tracked view
     const diffResult = generateDiffHtml(doc.originalText, doc.editedText || doc.originalText);
     setResultTracked(diffResult.html);
     setChangesCount(diffResult.changes);
@@ -455,7 +381,6 @@ export const useAIEditor = () => {
   };
 
   return {
-    // State
     editLevel,
     customInstruction,
     inputText,
@@ -474,15 +399,11 @@ export const useAIEditor = () => {
     chunkResults,
     progressMetrics: getProgressMetrics(),
     currentDocumentId,
-
-    // Setters
     setEditLevel,
     setCustomInstruction,
     setInputText,
     setActiveView,
     setDocumentName,
-
-    // Actions
     handleApplyEdit,
     handleCopy,
     handleDownloadDocx,

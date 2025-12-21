@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAIEditor } from '@/hooks/useAIEditor';
 import type { SavedDocument } from '@/hooks/useSavedDocuments';
 
-// Define theme constants
 const theme = {
   primary: '#4CAF50',
   secondary: '#2196F3',
@@ -20,7 +19,6 @@ const theme = {
   info: '#2196F3',
 };
 
-// Reusable style blocks
 const sectionBase = {
   backgroundColor: theme.card,
   border: `1px solid ${theme.border}`,
@@ -246,9 +244,7 @@ const EditorUI = () => {
 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [clipboardSupported, setClipboardSupported] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Check clipboard API support on mount
   useEffect(() => {
     const checkClipboardSupport = async () => {
       try {
@@ -264,7 +260,6 @@ const EditorUI = () => {
     checkClipboardSupport();
   }, []);
 
-  // Handle file upload
   const handleFileUpload = async (file: File) => {
     setUploadError(null);
     
@@ -290,19 +285,14 @@ const EditorUI = () => {
     }
   };
 
-  // Handle file input change
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       handleFileUpload(file);
-      // Reset input value to allow re-uploading same file
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      e.target.value = '';
     }
   };
 
-  // Check if results are available
   const hasResults = !isLoading && (resultClean || resultTracked);
 
   return (
@@ -310,18 +300,15 @@ const EditorUI = () => {
       <div style={containerStyle}>
         <h1 style={headingStyle}>AI Editorial Board — Document Editor</h1>
 
-        {/* Input */}
         <div style={sectionBase}>
           <h3 style={{ marginTop: 0 }}>Input Text</h3>
           
-          {/* File Upload Button */}
           <div>
             <input
               type="file"
               id="file-upload"
               accept=".doc, .docx"
               onChange={handleFileInputChange}
-              ref={fileInputRef}
               style={{ display: 'none' }}
             />
             <label 
@@ -349,13 +336,12 @@ const EditorUI = () => {
             Word count: <span>{wordCount.toLocaleString()} word{wordCount !== 1 ? 's' : ''}</span>
             {wordCount > 1000 && (
               <span style={{ color: theme.warning, marginLeft: '8px' }}>
-                Large document processing may take longer
+                
               </span>
             )}
           </div>
         </div>
 
-        {/* Edit Level */}
         <div style={sectionBase}>
           <h3 style={{ marginTop: 0 }}>Edit Level</h3>
           <div style={{ marginBottom: '10px' }}>
@@ -379,7 +365,6 @@ const EditorUI = () => {
           )}
         </div>
 
-        {/* Actions */}
         <div style={sectionBase}>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button 
@@ -397,7 +382,6 @@ const EditorUI = () => {
           
           {status.show && <div style={statusStyle(status.type)}>{status.message}</div>}
           
-          {/* Large Document Progress */}
           {isLoading && wordCount > 1000 && progressMetrics && (
             <div style={{ marginTop: '15px' }}>
               <div style={progressBarContainer}>
@@ -434,13 +418,11 @@ const EditorUI = () => {
           )}
         </div>
 
-        {/* Results */}
         <div style={sectionBase}>
           <h3 style={{ marginTop: 0 }}>Edited Output</h3>
           
           {hasResults && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* View toggles + Copy button inline */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
                 <button
                   style={toggleView(activeView === 'clean')}
@@ -456,8 +438,6 @@ const EditorUI = () => {
                 >
                   Tracked Changes
                 </button>
-
-                {/* Copy button right after Tracked Changes */}
                 <button 
                   onClick={handleCopy} 
                   style={{ 
@@ -500,13 +480,12 @@ const EditorUI = () => {
           )}
         </div>
 
-        {/* Documents Panel */}
         <div style={sectionBase}>
           <input
             type="text"
             value={documentName}
             onChange={(e) => setDocumentName(e.target.value)}
-            placeholder="Document name (optional)"
+            placeholder="Document name (optional) - will auto-generate from first 6 words if blank"
             style={inputStyle}
             disabled={isLoading}
           />
@@ -522,17 +501,7 @@ const EditorUI = () => {
                 >
                   💾 Save New Document
                 </button>
-                {currentDocumentId && (
-                  <button 
-                    onClick={handleSaveProgress} 
-                    style={{ 
-                      ...buttonBase, 
-                      backgroundColor: theme.warning,
-                    }}
-                  >
-                    🔁 Save Progress
-                  </button>
-                )}
+                
               </>
             )}
             <button 
@@ -547,7 +516,6 @@ const EditorUI = () => {
           </div>
         </div>
 
-        {/* Saved Documents */}
         {showDocuments && (
           <div style={{ ...sectionBase, marginTop: '20px' }}>
             <h3 style={{ marginTop: 0 }}>Saved Documents</h3>
@@ -566,14 +534,11 @@ const EditorUI = () => {
               </div>
             ) : (
               <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                {savedDocuments.map((doc: SavedDocument) => (
+                {savedDocuments.map((doc) => (
                   <div 
                     key={doc.id} 
-                    style={{
-                      ...documentItemStyle,
-                      borderLeft: doc.id === currentDocumentId ? `4px solid ${theme.primary}` : 'none',
-                      paddingLeft: doc.id === currentDocumentId ? '6px' : '10px',
-                    }}
+                    style={documentItemStyle}
+                    onClick={() => loadDocument(doc)}
                   >
                     <div
                       style={{
@@ -590,10 +555,7 @@ const EditorUI = () => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          cursor: 'pointer',
                         }}
-                        onClick={() => loadDocument(doc)}
-                        title={`Load: ${doc.name}`}
                       >
                         {doc.name}
                       </div>
@@ -617,8 +579,11 @@ const EditorUI = () => {
                           color: theme.secondary,
                           transition: 'all 0.2s',
                         }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          loadDocument(doc);
+                        }}
                         title="Open document"
-                        onClick={() => loadDocument(doc)}
                       >
                         ↗
                       </button>
@@ -637,8 +602,13 @@ const EditorUI = () => {
                           color: theme.danger,
                           transition: 'all 0.2s',
                         }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete document "${doc.name}"?`)) {
+                            deleteDocument(doc.id);
+                          }
+                        }}
                         title="Delete document"
-                        onClick={() => deleteDocument(doc.id)}
                       >
                         ✕
                       </button>

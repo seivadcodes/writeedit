@@ -20,23 +20,17 @@ export function useSavedDocuments() {
   const [savedDocuments, setSavedDocuments] = useState<SavedDocument[]>([]);
   const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
 
-  // Load from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem(SAVED_DOCUMENTS_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        // Sort by timestamp descending (newest first)
-        parsed.sort((a: SavedDocument, b: SavedDocument) => b.timestamp - a.timestamp);
-        setSavedDocuments(parsed.slice(0, MAX_SAVED_DOCUMENTS));
+        setSavedDocuments(JSON.parse(saved));
       }
     } catch (e) {
       console.error('Failed to load saved documents:', e);
-      localStorage.setItem(SAVED_DOCUMENTS_KEY, JSON.stringify([]));
     }
   }, []);
 
-  // Save full document (new)
   const saveDocument = ({
     name,
     originalText,
@@ -72,7 +66,6 @@ export function useSavedDocuments() {
     return document.id;
   };
 
-  // Save progress to current document
   const saveProgressToCurrentDocument = ({
     originalText,
     editedText,
@@ -88,45 +81,10 @@ export function useSavedDocuments() {
           ? { ...doc, originalText, editedText, timestamp: Date.now() }
           : doc
       );
-      
-      // Sort by timestamp descending
-      updated.sort((a, b) => b.timestamp - a.timestamp);
-      
       localStorage.setItem(SAVED_DOCUMENTS_KEY, JSON.stringify(updated));
       return updated;
     });
     return true;
-  };
-
-  // Auto-save (call from editor debounce)
-  const autoSaveProgress = ({
-    originalText,
-    editedText,
-  }: {
-    originalText: string;
-    editedText: string;
-  }) => {
-    if (!currentDocumentId || !originalText || !editedText) return;
-    
-    try {
-      const updated = savedDocuments.map((doc) =>
-        doc.id === currentDocumentId
-          ? { ...doc, originalText, editedText, timestamp: Date.now() }
-          : doc
-      );
-      
-      // Sort by timestamp descending
-      updated.sort((a, b) => b.timestamp - a.timestamp);
-      
-      localStorage.setItem(SAVED_DOCUMENTS_KEY, JSON.stringify(updated));
-      setSavedDocuments(updated);
-    } catch (e) {
-      console.warn('Auto-save failed:', e);
-    }
-  };
-
-  const setCurrentDocument = (id: string | null) => {
-    setCurrentDocumentId(id);
   };
 
   const deleteDocument = (id: string) => {
@@ -141,8 +99,7 @@ export function useSavedDocuments() {
     currentDocumentId,
     saveDocument,
     saveProgressToCurrentDocument,
-    autoSaveProgress,
-    setCurrentDocument,
+    setCurrentDocument: setCurrentDocumentId, // Fixed naming here
     deleteDocument,
   };
 }

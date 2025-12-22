@@ -13,16 +13,18 @@ const FREE_MODELS = [
   'tngtech/deepseek-r1t2-chimera:free',
 ];
 
-// 🧹 Helper: Strip Markdown bold/italic/headers from plain text
 function sanitizePlainText(text: string): string {
   if (typeof text !== 'string') return '';
   return text
-    .replace(/\*\*(.*?)\*\*/g, '$1')        // **bold** → bold
-    .replace(/\*(.*?)\*/g, '$1')            // *italic* → italic
-    .replace(/__(.*?)__/g, '$1')            // __bold__ → bold
-    .replace(/_(.*?)_/g, '$1')              // _italic_ → italic
-    .replace(/^#{1,6}\s*/gm, '')            // # Heading → Heading
-    .replace(/\s+/g, ' ')                   // Normalize excessive whitespace
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/^#{1,6}\s*/gm, '')
+    // Preserve paragraph breaks while normalizing other whitespace
+    .replace(/([^\n])\n(?!\n)/g, '$1 ')  // Replace single line breaks with spaces
+    .replace(/\n{3,}/g, '\n\n')          // Normalize excessive paragraph breaks
+    .replace(/[ \t]+/g, ' ')             // Normalize spaces/tabs within paragraphs
     .trim();
 }
 

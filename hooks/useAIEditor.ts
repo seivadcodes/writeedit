@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { diffWords } from 'diff';
 import { chunkText } from '@/lib/chunking';
 import { useSavedDocuments, SavedDocument } from './useSavedDocuments';
+import { handleCopy as copyUtils } from '@/lib/copyUtils';
 
 export type EditLevel = 'proofread' | 'rewrite' | 'formal' | 'custom';
 export type ViewMode = 'clean' | 'tracked';
@@ -60,7 +61,6 @@ export const useAIEditor = () => {
   });
   const [isLoading, setIsLoading] = useState(false);
 
-  // Large document processing state
   const [chunks, setChunks] = useState<string[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(-1);
   const [chunkResults, setChunkResults] = useState<string[]>([]);
@@ -128,7 +128,6 @@ export const useAIEditor = () => {
 
     for (let i = 0; i < chunksArray.length; i++) {
       setCurrentChunkIndex(i);
-      
 
       const editedChunk = await processChunk(chunksArray[i], i);
       
@@ -151,6 +150,13 @@ export const useAIEditor = () => {
     return { fullClean, fullTracked, totalChanges };
   };
 
+  const showStatus = (type: StatusType, message: string, durationMs: number = 0) => {
+    setStatus({ type, message, show: true });
+    if (durationMs > 0) {
+      setTimeout(() => setStatus(prev => ({ ...prev, show: false })), durationMs);
+    }
+  };
+
   const handleApplyEdit = async () => {
     if (!inputText.trim()) {
       showStatus('warning', 'Enter text first');
@@ -158,7 +164,6 @@ export const useAIEditor = () => {
     }
 
     setIsLoading(true);
-    
 
     try {
       let finalClean = '';
@@ -211,7 +216,6 @@ export const useAIEditor = () => {
 
         showStatus('success', 'Large document edited successfully!', 3000);
       }
-
     } catch (err: any) {
       console.error('[AI Editor] 🔥 Edit error:', err);
       showStatus('error', `Processing failed: ${err.message || 'Unknown error'}`, 5000);
@@ -224,78 +228,9 @@ export const useAIEditor = () => {
     }
   };
 
-  const handleCopy = async () => {
-    try {
-      if (activeView === 'clean') {
-        await navigator.clipboard.writeText(resultClean);
-        showStatus('success', 'Text copied!', 2000);
-      } else if (activeView === 'tracked') {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(resultTracked, 'text/html');
-        let plainText = doc.body.textContent || '';
-        if (!plainText.trim()) {
-          plainText = resultTracked.replace(/<[^>]*>/g, '');
-        }
-
-        if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
-          try {
-            const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Tracked Changes</title>
-  <style>
-    ins { background: #e6ffe6; text-decoration: underline; color: #006400; }
-    del { background: #ffe6e6; text-decoration: line-through; color: #b22222; }
-  </style>
-</head>
-<body>
-  ${resultTracked}
-</body>
-</html>`;
-
-            const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-            const textBlob = new Blob([plainText], { type: 'text/plain' });
-            const clipboardItem = new ClipboardItem({
-              'text/html': htmlBlob,
-              'text/plain': textBlob,
-            });
-            await navigator.clipboard.write([clipboardItem]);
-            showStatus('success', 'Tracked changes copied with formatting!', 2000);
-            return;
-          } catch (htmlCopyError) {
-            console.warn('[AI Editor] Falling back to plain text copy:', htmlCopyError);
-          }
-        }
-
-        await navigator.clipboard.writeText(plainText);
-        showStatus('success', 'Text copied (plain text)!', 2000);
-      }
-    } catch (err: any) {
-      console.error('[AI Editor] 🔥 Copy failed:', err);
-      
-      try {
-        const textToCopy = activeView === 'clean' 
-          ? resultClean 
-          : new DOMParser().parseFromString(resultTracked, 'text/html').body.textContent || '';
-        
-        const textarea = document.createElement('textarea');
-        textarea.value = textToCopy;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-        
-        showStatus('success', 'Text copied (legacy method)!', 2000);
-      } catch (fallbackErr) {
-        console.error('[AI Editor] 🔥 Legacy copy failed:', fallbackErr);
-        showStatus('error', 'Copy failed. Please select and copy manually.', 3000);
-      }
-    }
-  };
+  const handleCopy = useCallback(async () => {
+    await copyUtils(activeView, resultClean, resultTracked, showStatus);
+  }, [activeView, resultClean, resultTracked, showStatus]);
 
   const handleDownloadDocx = () => {
     showStatus('info', 'DOCX export coming soon!', 2000);
@@ -351,13 +286,6 @@ export const useAIEditor = () => {
     setChangesCount(diffResult.changes);
     setShowDocuments(false);
     showStatus('info', `Loaded: ${doc.name}`, 2000);
-  };
-
-  const showStatus = (type: StatusType, message: string, durationMs: number = 0) => {
-    setStatus({ type, message, show: true });
-    if (durationMs > 0) {
-      setTimeout(() => setStatus(prev => ({ ...prev, show: false })), durationMs);
-    }
   };
 
   const getProgressMetrics = () => {

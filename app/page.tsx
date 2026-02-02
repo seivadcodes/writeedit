@@ -13,7 +13,7 @@ export default function EditorLanding() {
       id: 'editor',
       title: 'AI Editor',
       emoji: '✨',
-      description: 'Polish your book with AI — proofread, rewrite, or formalize.',
+      description: 'Polish your book with Smart AI — proofread, rewrite, or formalize.',
       link: '/editor/',
       comingSoon: false,
     },
